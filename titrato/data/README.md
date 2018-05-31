@@ -18,4 +18,4 @@ correct files.
 
 ## Manifest
 
-* `look_and_say.dat`: first entries of the "Look and Say" integer series, sequence [A005150](https://oeis.org/A005150)
+* `SAMPL6_experimental_pkas.csv`: SAMPL6 Experimental pKa dataset by Mehtap Isik et al. To be published 2018.

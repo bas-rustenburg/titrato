@@ -3,12 +3,11 @@ titrato
 Utilities for calculating titration curves.
 """
 
-# Make Python 2 and 3 imports work the same
-# Safe to remove with Python 3-only code
-from __future__ import absolute_import
-
-# Add imports here
 from .titrato import *
+import os
+
+pkg_dir =  os.path.split(__file__)[0]
+data_dir = os.path.join(pkg_dir, "data")
 
 # Handle versioneer
 from ._version import get_versions

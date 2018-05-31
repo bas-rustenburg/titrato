@@ -11,7 +11,9 @@ from itertools import chain, combinations
 from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional
 import networkx as nx
 import matplotlib.pyplot as plt
+import os
 import warnings
+from . import data_dir
 
 logger = logging.getLogger()
 
@@ -271,12 +273,6 @@ def free_energy_from_population(populations: np.ndarray) -> np.ndarray:
     return free_energies - free_energies[0]
 
 
-def squared_residuals(observation, prediction):
-    """Return the squared difference between an observation, and a predicted curve."""
-    joint = np.array([observation, prediction])
-    return np.square(np.diff(joint, axis=0)).flatten()
-
-
 def powerset(iterable: Iterable[float]) -> Iterator[Tuple[float, ...]]:
     "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
     s = list(iterable)
@@ -503,7 +499,7 @@ class TitrationCurve:
 class SAMPL6Experiment(TitrationCurve):
     """Class to represent a Sirius T3 experimental titration curve from the SAMPL6 dataset."""
     # Experiments by Mehtap Isik, 2018
-    experimental_data_file = "experimental_pkas.csv"
+    experimental_data_file = os.path.join(data_dir, "SAMPL6_experimental_pkas.csv")
     ph_range = np.linspace(2, 12, num=201)
 
     def __init__(self):
