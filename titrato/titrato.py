@@ -8,12 +8,15 @@ import pandas as pd
 import holoviews as hv
 import logging
 from itertools import chain, combinations
-from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional
+from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional, Callable
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
 import warnings
 from . import data_dir
+from scipy.optimize import linear_sum_assignment
+import math
+from copy import deepcopy
 
 logger = logging.getLogger()
 
@@ -67,7 +70,7 @@ def graph_to_axes(graph: Union[nx.DiGraph, nx.Graph], ax: Optional[plt.Axes]=Non
     return ax
 
 
-def get_experimental_pKa_data(molecule_name: str, datafile: str) -> Tuple[np.ndarray, np.ndarray]:
+def get_experimental_pKa_data(molecule_name: str, datafile: str=os.path.join(data_dir, "SAMPL6_experimental_pkas.csv")) -> Tuple[np.ndarray, np.ndarray]:
     """Retrieve experimental pKa values, and errors from the experimental csv file."""
     df = pd.read_csv(datafile)
 
@@ -277,6 +280,152 @@ def powerset(iterable: Iterable[float]) -> Iterator[Tuple[float, ...]]:
     "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+
+def rmsd(x1:float, x2:float) -> float:
+    """Returns the root of the mean squared deviation between two numbers."""
+    return np.sqrt((x1 -x2)**2)
+
+def msd(x1:float, x2:float) -> float:
+    """Returns the mean squared deviation between two numbers."""
+    return (x1 -x2)**2
+
+def absolute_difference(x1: float, x2: float):
+    """Returns the absolute difference between two numbers."""
+    return np.abs(x1-x2)
+
+def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]) -> pd.DataFrame:
+    """Using the Hungarian algorithm (a.ka. linear sum assignment), return a mapping between experiment, and predicted pKas,
+    and the error.    
+   
+    Parameters
+    ----------
+    experimental_pkas - 1D array of experimental pKa values
+    predicted_pkas - 1D array of predicted pKa values
+    cost_function - function to calculate the cost of any invidual mapping    
+    """
+
+    n_experimental = experimental_pkas.size
+    n_predicted = predicted_pkas.size
+    size = max([n_experimental, n_predicted])
+    cost_matrix = np.zeros([size,size])
+    for i in range(n_experimental):        
+        experimental_pka = experimental_pkas[i]
+        for j in range(n_predicted):
+            predicted_pka = predicted_pkas[j]
+            cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)
+
+    row_indices, col_indices = linear_sum_assignment(cost_matrix)
+    cost = cost_matrix[row_indices, col_indices].sum()
+    
+    df = pd.DataFrame(columns=["Experimental", "Predicted", "Cost"])
+    for i, row_id in enumerate(row_indices):
+        col_id = col_indices[i]
+        # Skip unmatched
+        if row_id >= n_experimental:
+            df = df.append({"Experimental": np.nan, "Predicted": predicted_pkas[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)        
+        elif col_id >= n_predicted:
+            df = df.append({"Experimental": experimental_pkas[row_id], "Predicted": np.nan, "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)         
+        else:
+            df = df.append({"Experimental": experimental_pkas[row_id], "Predicted": predicted_pkas[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)
+
+    return df
+
+def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]):
+    """Align pKas sequentialy and find the alignment that minimizes the cost.
+    
+    Parameters
+    ----------
+    experimental_pkas - 1D array of experimental pKa values
+    predicted_pkas - 1D array of predicted pKa values
+    cost_function - function to calculate the cost of any invidual mapping.
+    
+    """
+    n_experimental = experimental_pkas.size
+    n_predicted = predicted_pkas.size
+    size = max([n_experimental, n_predicted])
+
+    exp = np.zeros(size)
+    pred = np.zeros(size)
+
+    experimental_pkas.sort()
+    predicted_pkas.sort()
+
+    exp[:n_experimental] = experimental_pkas
+    pred[:n_predicted] = predicted_pkas
+
+    min_cost = 1.0e14
+    solution = deepcopy(pred)
+    for i in range(size):
+        pred = np.roll(pred, 1)
+        cost = cost_function(exp, pred)
+        total_cost = cost.sum()
+        if total_cost < min_cost:
+            solution = deepcopy(pred)
+            min_cost = total_cost
+    
+    return pd.DataFrame.from_dict({"Experimental":  exp, "Predicted":  solution, "Cost": cost_function(exp, solution)})
+
+def closest_pka(experimental_pkas:np.ndarray, predicted_pkas:np.ndarray, cost_function:Callable[[float,float], float])-> pd.DataFrame:
+    """Find the closest match-ups between experiment and prediction.    
+
+    Parameters
+    ----------
+    experimental_pkas - 1D array of experimental pKa values
+    predicted_pkas - 1D array of predicted pKa values
+    cost_function - function to calculate the cost of any invidual mapping.
+
+    Notes
+    -----
+
+    The algorithm
+    1. ) construct a cost matrix, matching up each experiment (rows0) and each prediction (columns) and calculating the cost.
+    2. ) Find the minimum value in the matrix, add match to matches
+    3. ) Remove row, column
+    4. ) Repeat 2-3 until matrix has size 0
+    5. ) Any remaing pKa values are mapped to NaN
+
+    """
+    
+    exp = deepcopy(experimental_pkas)
+    pred = deepcopy(predicted_pkas)
+    
+    n_experimental = experimental_pkas.size
+    n_predicted = predicted_pkas.size    
+    cost_matrix = np.empty([n_experimental,n_predicted])
+    for i in range(n_experimental):        
+        experimental_pka = experimental_pkas[i]
+        for j in range(n_predicted):
+            predicted_pka = predicted_pkas[j]
+            cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)
+    
+    df = pd.DataFrame(columns=["Experimental", "Predicted", "Cost"])
+    
+    # Continue 
+    while cost_matrix.size > 0:
+        match = np.argmin(cost_matrix)
+        row, col = divmod(match, cost_matrix.shape[1])
+        exp_pka = exp[row]
+        pred_pka = pred[col]
+        cost = cost_matrix[row,col]
+        exp = np.delete(exp, row)
+        pred = np.delete(pred, col)
+        cost_matrix = np.delete(cost_matrix,row,0)
+        cost_matrix = np.delete(cost_matrix,col,1)        
+        df = df.append({"Experimental": exp_pka, "Predicted": pred_pka, "Cost": cost}, ignore_index=True)
+    
+    # return any left over as nan match
+    for leftover_pka in exp:
+        df = df.append({"Experimental": leftover_pka, "Predicted": np.nan, "Cost": cost_function(leftover_pka, 0.0)}, ignore_index=True)
+    for leftover_pka in pred:
+        df = df.append({"Experimental": np.nan, "Predicted": leftover_pka, "Cost": cost_function(leftover_pka, 0.0)}, ignore_index=True)
+        
+    return df
+
+
+def remove_unmatched_predictions(matches: pd.DataFrame) -> pd.DataFrame:
+    """Remove predicted pKas that have no experimental match."""
+    return matches[matches.Experimental != np.nan]
+
 
 
 class TitrationCurve:
@@ -527,7 +676,7 @@ class SAMPL6Experiment(TitrationCurve):
         if datafile is None:
             datafile = cls.experimental_data_file
         macropKas, sems = get_experimental_pKa_data(
-            mol_id, "experimental_pkas.csv")
+            mol_id, datafile)
         instance = cls.from_macro_pkas(macropKas, cls.ph_range)
         # Store data for reference
         instance.pkas = macropKas
