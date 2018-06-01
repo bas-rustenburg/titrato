@@ -1,6 +1,6 @@
 package:
   name: titrato
-  version: "0.0.0"
+  version: "0.0.1"
 
 source:
   path: ../..
@@ -11,10 +11,16 @@ build:
 requirements:
   build:
     - python
-    - setuptools
+    - setuptools    
 
   run:
     - python
+    - scipy
+    - numpy
+    - holoviews
+    - matplotlib
+    - pandas
+    - networkx
 
 test:
   requires:
