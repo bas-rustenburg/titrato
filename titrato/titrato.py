@@ -263,8 +263,41 @@ def powerset(iterable: Iterable[float]) -> Iterator[Tuple[float, ...]]:
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-def rmsd(x1:float, x2:float) -> float:
-    """Returns the root of the mean squared deviation between two numbers."""
+
+def dynamic_range_solve(x1: float,x2: float, lower:float, upper:float)-> Tuple[float, float]:
+    """Backfill nan values with the lower, or upper bound of a dynamic range, based on the position of the value to be compared against."""
+    if np.isnan(x1):        
+        if x2 >= 7.0:
+            return upper, x2
+        elif x2 < 7.0:
+            return lower, x2
+    elif np.isnan(x2):        
+        if x1 >= 7.0:
+            return x1, upper
+        elif x1 < 7.0:
+            return x1, lower
+    else:
+        return x1, x2
+
+def fixed_cost_solve(x1: float,x2: float, cost:float=0.0)-> Tuple[float, float]:
+    """Build in a fixed cost if one of two numbers is not defined."""
+    if np.isnan(x1):        
+        return x2+cost, x2        
+    elif np.isnan(x2):        
+        return x1,x1+cost
+    else: 
+        return x1,x2
+
+def fixed_value_solve(x1: float,x2: float, value:float=0.0)-> Tuple[float, float]:
+
+    if np.isnan(x1):        
+        return value, x2        
+    elif np.isnan(x2):        
+        return x1, value
+    else: 
+        return x1,x2
+
+def rmsd(x1: float, x2:float) -> float:    
     return np.sqrt((x1 -x2)**2)
 
 def msd(x1:float, x2:float) -> float:
@@ -286,28 +319,30 @@ def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cos
     cost_function - function to calculate the cost of any invidual mapping    
     """
 
-    n_experimental = experimental_pkas.size
-    n_predicted = predicted_pkas.size
+    n_experimental = experimental_pkas["pKa"].values.size
+    n_predicted = predicted_pkas["pKa"].values.size
     size = max([n_experimental, n_predicted])
+    # not matched up has 0 cost
     cost_matrix = np.zeros([size,size])
-    for i in range(n_experimental):        
-        experimental_pka = experimental_pkas[i]
-        for j in range(n_predicted):
-            predicted_pka = predicted_pkas[j]
-            cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)
-
-    row_indices, col_indices = linear_sum_assignment(cost_matrix)    
+    for i in range(size):                
+        for j in range(size):            
+            if i < n_experimental and j < n_predicted:
+                experimental_pka = experimental_pkas["pKa"].values[i]
+                predicted_pka = predicted_pkas["pKa"].values[j]
+                cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)           
     
+    row_indices, col_indices = linear_sum_assignment(cost_matrix)
+        
     df = pd.DataFrame(columns=["Experimental", "Predicted", "Cost"])
     for i, row_id in enumerate(row_indices):
         col_id = col_indices[i]
         # Skip unmatched
         if row_id >= n_experimental:
-            df = df.append({"Experimental": np.nan, "Predicted": predicted_pkas[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)        
+            df = df.append({"Experimental": np.nan, "Experimental SEM" : np.nan, "Predicted": predicted_pkas["pKa"].values[col_id], "Predicted SEM": predicted_pkas["SEM"].values[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)        
         elif col_id >= n_predicted:
-            df = df.append({"Experimental": experimental_pkas[row_id], "Predicted": np.nan, "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)         
+            df = df.append({"Experimental": experimental_pkas["pKa"].values[row_id], "Experimental SEM" : experimental_pkas["SEM"].values[row_id], "Predicted": np.nan, "Predicted SEM": np.nan, "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)         
         else:
-            df = df.append({"Experimental": experimental_pkas[row_id], "Predicted": predicted_pkas[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)
+            df = df.append({"Experimental": experimental_pkas["pKa"].values[row_id], "Experimental SEM" : experimental_pkas["SEM"].values[row_id], "Predicted": predicted_pkas["pKa"].values[col_id], "Predicted SEM": predicted_pkas["SEM"].values[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)
 
     return df
 
@@ -318,33 +353,50 @@ def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_fu
     ----------
     experimental_pkas - 1D array of experimental pKa values
     predicted_pkas - 1D array of predicted pKa values
-    cost_function - function to calculate the cost of any invidual mapping.
-    
+    cost_function - function to calculate the cost of any invidual mapping.    
     """
-    n_experimental = experimental_pkas.size
-    n_predicted = predicted_pkas.size
-    size = max([n_experimental, n_predicted])
+    n_experimental = experimental_pkas["pKa"].values.size  
+    n_predicted = predicted_pkas["pKa"].values.size 
+    # biggest size, and additional zero
+    num_ka = max([n_experimental, n_predicted])
+    exp = np.empty(num_ka)
+    pred = np.empty(num_ka)
+    sem_exp = np.empty(num_ka)
+    sem_pred = np.empty(num_ka)
+    pred[:] = np.nan
+    exp[:] = np.nan
+    sem_pred[:] = np.nan
+    sem_exp[:] = np.nan
 
-    exp = np.zeros(size)
-    pred = np.zeros(size)
+    experimental_pkas["pKa"].values.sort()
+    predicted_pkas["pKa"].values.sort()    
+    exp[:n_experimental] = experimental_pkas["pKa"].values
+    pred[:n_predicted] = predicted_pkas["pKa"].values
 
-    experimental_pkas.sort()
-    predicted_pkas.sort()
-
-    exp[:n_experimental] = experimental_pkas
-    pred[:n_predicted] = predicted_pkas
+    sem_pred[:n_predicted] = predicted_pkas["SEM"].values
+    sem_exp[:n_experimental] = experimental_pkas["SEM"].values
 
     min_cost = 1.0e14
     solution = deepcopy(pred)
-    for _ in range(size):
+    sol_sem = deepcopy(sem_pred)
+    solution_cost = np.empty(num_ka)
+    for _ in range(num_ka):
         pred = np.roll(pred, 1)
-        cost = cost_function(exp, pred)
-        total_cost = cost.sum()
+        sem_pred = np.roll(sem_pred, 1)
+        cost = []
+        for e1,p1 in np.array([deepcopy(exp), deepcopy(pred)]).T:
+            # if a pKa is dropped at the low end, match to 0
+            # If a pKa is dropped at the high end, match to 14            
+            e1,p1 = dynamic_range_solve(e1,p1, 0.0, 14.0)                            
+            cost.append(cost_function(e1,p1))
+        total_cost = np.sum(cost)
         if total_cost < min_cost:
             solution = deepcopy(pred)
             min_cost = total_cost
-    
-    return pd.DataFrame.from_dict({"Experimental":  exp, "Predicted":  solution, "Cost": cost_function(exp, solution)})
+            solution_cost = cost
+            sol_sem = deepcopy(sem_pred)
+
+    return pd.DataFrame.from_dict({"Experimental":  exp, "Experimental SEM": sem_exp,  "Predicted":  solution, "Predicted SEM": sol_sem,  "Cost": solution_cost})
 
 def closest_pka(experimental_pkas:np.ndarray, predicted_pkas:np.ndarray, cost_function:Callable[[float,float], float])-> pd.DataFrame:
     """Find the closest match-ups between experiment and prediction.    
@@ -367,38 +419,47 @@ def closest_pka(experimental_pkas:np.ndarray, predicted_pkas:np.ndarray, cost_fu
 
     """
     
-    exp = deepcopy(experimental_pkas)
-    pred = deepcopy(predicted_pkas)
+    experiment_copy = deepcopy(experimental_pkas["pKa"].values)
+    predicted_copy = deepcopy(predicted_pkas["pKa"].values)
+    sem_experiment_copy = deepcopy(experimental_pkas["SEM"].values)
+    sem_predicted_copy =  deepcopy(predicted_pkas["SEM"].values)
     
-    n_experimental = experimental_pkas.size
-    n_predicted = predicted_pkas.size    
+    n_experimental = experiment_copy.size
+    n_predicted = predicted_copy.size
     cost_matrix = np.empty([n_experimental,n_predicted])
     for i in range(n_experimental):        
-        experimental_pka = experimental_pkas[i]
+        experimental_pka = experiment_copy[i]
         for j in range(n_predicted):
-            predicted_pka = predicted_pkas[j]
+            predicted_pka = predicted_copy[j]
             cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)
     
-    df = pd.DataFrame(columns=["Experimental", "Predicted", "Cost"])
+    df = pd.DataFrame(columns=["Experimental", "Experimental SEM", "Predicted", "Predicted SEM", "Cost"])
     
     # Continue 
-    while cost_matrix.size > 0:
-        match = np.argmin(cost_matrix)
+    while cost_matrix.size > 0:        
+        # Find the best match        
+        match = np.nanargmin(cost_matrix)
+        # divide gives row, mod gives col
         row, col = divmod(match, cost_matrix.shape[1])
-        exp_pka = exp[row]
-        pred_pka = pred[col]
+        experimental_pka = experiment_copy[row]
+        predicted_pka = predicted_copy[col]
+        experimental_sem = sem_experiment_copy[row]
+        predicted_sem = sem_predicted_copy[col]        
         cost = cost_matrix[row,col]
-        exp = np.delete(exp, row)
-        pred = np.delete(pred, col)
+        df = df.append({"Experimental": experimental_pka, "Experimental SEM": experimental_sem, "Predicted": predicted_pka, "Predicted SEM": predicted_sem, "Cost": cost}, ignore_index=True)
+        experiment_copy = np.delete(experiment_copy, row)
+        predicted_copy = np.delete(predicted_copy, col)
+        sem_experiment_copy = np.delete(sem_experiment_copy, row)
+        sem_predicted_copy = np.delete(sem_predicted_copy, col)
         cost_matrix = np.delete(cost_matrix,row,0)
         cost_matrix = np.delete(cost_matrix,col,1)        
-        df = df.append({"Experimental": exp_pka, "Predicted": pred_pka, "Cost": cost}, ignore_index=True)
+        
     
-    # return any left over as nan match
-    for leftover_pka in exp:
-        df = df.append({"Experimental": leftover_pka, "Predicted": np.nan, "Cost": cost_function(leftover_pka, 0.0)}, ignore_index=True)
-    for leftover_pka in pred:
-        df = df.append({"Experimental": np.nan, "Predicted": leftover_pka, "Cost": cost_function(leftover_pka, 0.0)}, ignore_index=True)
+    # return any left over as nan match and calculate cost based on distance to 0.0, or 14.0
+    for leftover_pka, leftover_sem in zip(experiment_copy, sem_experiment_copy):
+        df = df.append({"Experimental": leftover_pka, "Experimental SEM": leftover_sem, "Predicted": np.nan, "Predicted SEM": np.nan, "Cost": cost_function(*dynamic_range_solve(leftover_pka, np.nan,0.0, 14.0))}, ignore_index=True)
+    for leftover_pka, leftover_sem in zip(predicted_copy, sem_predicted_copy):
+        df = df.append({"Experimental": np.nan, "Experimental SEM": np.nan, "Predicted": leftover_pka, "Predicted SEM": leftover_sem, "Cost": cost_function(*dynamic_range_solve(leftover_pka, np.nan,0.0, 14.0))}, ignore_index=True)
         
     return df
 

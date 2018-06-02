@@ -13,7 +13,7 @@ def get_typeiii_pka_data(molecule_name: str, datafile, header=0):
     df = pd.read_csv(datafile, header=header)
     # Override column names
     df.columns = ["Molecule", "pKa", "SEM"]
-    return df[df['Molecule' == molecule_name]]
+    return df[df['Molecule'] == molecule_name]
 
 def get_experimental_pKa_data(molecule_name: str, datafile: str=os.path.join(data_dir, "SAMPL6_experimental_pkas.csv")) -> Tuple[np.ndarray, np.ndarray]:
     """Retrieve experimental pKa values, and errors from the experimental csv file."""
@@ -30,9 +30,12 @@ def get_experimental_pKa_data(molecule_name: str, datafile: str=os.path.join(dat
     pKas = np.asarray(pKas)
     sems = np.asarray(sems)
     mask = np.isnan(pKas)
-    return pKas[~mask], sems[~mask]
-
-
+    pKas = pKas[~mask]
+    sems= sems[~mask]
+    new_df = pd.DataFrame.from_records(dict(pKa=pKas, SEM=sems))
+    new_df["Molecule"] = molecule_name
+    
+    return new_df[["Molecule", "pKa", "SEM"]]
 
 class SAMPL6Experiment(TitrationCurve):
     """Class to represent a Sirius T3 experimental titration curve from the SAMPL6 dataset."""
