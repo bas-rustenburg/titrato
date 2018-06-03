@@ -263,9 +263,8 @@ def powerset(iterable: Iterable[float]) -> Iterator[Tuple[float, ...]]:
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-
 def dynamic_range_solve(x1: float,x2: float, lower:float, upper:float)-> Tuple[float, float]:
-    """Backfill nan values with the lower, or upper bound of a dynamic range, based on the position of the value to be compared against."""
+    """Fill any missing values with the lower, or upper bound of a dynamic range, based on the position of the value to be compared against."""
     if np.isnan(x1):        
         if x2 >= 7.0:
             return upper, x2
@@ -280,7 +279,7 @@ def dynamic_range_solve(x1: float,x2: float, lower:float, upper:float)-> Tuple[f
         return x1, x2
 
 def fixed_cost_solve(x1: float,x2: float, cost:float=0.0)-> Tuple[float, float]:
-    """Build in a fixed cost if one of two numbers is not defined."""
+    """Fill any missing value with the other value, plus an offset"""
     if np.isnan(x1):        
         return x2+cost, x2        
     elif np.isnan(x2):        
@@ -288,16 +287,15 @@ def fixed_cost_solve(x1: float,x2: float, cost:float=0.0)-> Tuple[float, float]:
     else: 
         return x1,x2
 
-def fixed_value_solve(x1: float,x2: float, value:float=0.0)-> Tuple[float, float]:
-
+def fixed_value_solve(x1: float, x2: float, value:float=0.0)-> Tuple[float, float]:
+    """Fill any missing value with a fixed value."""
     if np.isnan(x1):        
         return value, x2        
     elif np.isnan(x2):        
         return x1, value
     else: 
         return x1,x2
-
-
+ 
 
 def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]) -> pd.DataFrame:
     """Using the Hungarian algorithm (a.ka. linear sum assignment), return a mapping between experiment, and predicted pKas,
@@ -519,6 +517,8 @@ class TitrationCurve:
         instance.state_ids = state_ids
         instance.nbound = np.asarray(nbound)
         instance.mean_charge = instance.nbound @ instance.populations
+        # Set lowest value to 0
+        instance.mean_charge -= int(round(min(instance.mean_charge)))
 
         return instance
 
@@ -575,6 +575,8 @@ class TitrationCurve:
         instance.state_ids = node_topology
         instance.nbound = np.asarray(nbound)
         instance.mean_charge = instance.nbound @ instance.populations
+         # Set lowest value to 0
+        instance.mean_charge -= int(round(min(instance.mean_charge)))
 
         return instance
 
@@ -602,6 +604,8 @@ class TitrationCurve:
         instance.state_ids = state_ids
         instance.nbound = np.asarray(nbound)
         instance.mean_charge = instance.nbound @ instance.populations
+         # Set lowest value to 0
+        instance.mean_charge -= int(round(min(instance.mean_charge)))
         
 
         return instance
@@ -636,8 +640,52 @@ class TitrationCurve:
         instance.ph_values = ph_values
         instance.nbound = np.asarray(nbound)
         instance.mean_charge = instance.nbound @ instance.populations
+         # Set lowest value to 0
+        instance.mean_charge -= int(round(min(instance.mean_charge)))
 
         return instance
+
+    def align_mean_charge(self, other_curve, distance_function: Callable[[np.ndarray, np.ndarray, Optional[Any]],float], *args) -> None:
+        """Find the offset between the mean charge of this curve and the other that produces the closest match and shifts this mean charge curve by that offset.
+        
+        Parameters
+        ----------
+        self - this titration curve object.
+        other_curve - the second titration curve object
+        distance_functions - function that takes two curves and returns the distance.
+        args - additional positional arguments to pass into the distance function.
+        Notes
+        -----
+        Modifies this curve in place.
+
+        Returns
+        -------
+        None    
+        """
+
+        # Grab charge curves, and ensure lowest value is 0.
+        q1 = other_curve.mean_charge
+        q1 -= int(round(min(q1)))    
+        q2 = self.mean_charge
+        q2 -=int(round(min(q2)))
+        
+        max1 = int(round(max(q1)))
+        max2 = int(round(max(q2)))
+
+        # Maximum range of the alignment is from -max, max
+        m = max([max1,max2])
+        distance = 1.e16
+        aligned_q2 = q2
+        offset = 0
+        for i in range(-m,m+1):
+            new_q2 = q2 + i
+            new_distance = distance_function(q1, new_q2, *args)            
+            if new_distance < distance:
+                distance = new_distance
+                aligned_q2 = new_q2
+                offset = i
+        
+        self.mean_charge = aligned_q2
 
     def plot(self, category_name: str) -> hv.Layout:
         """Plot the titration curve as a function of pH.

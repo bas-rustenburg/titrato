@@ -32,10 +32,8 @@ def pearson_with_confidence(x:np.ndarray,y:np.ndarray, α: float)-> Tuple[float,
 
     return r, r_min, r_plus
 
-
-
-
 def rmsd(x1: float, x2:float) -> float:    
+    """Returns the root mean squared deviation between two numbers"""
     return np.sqrt((x1 -x2)**2)
 
 def msd(x1:float, x2:float) -> float:
@@ -45,4 +43,17 @@ def msd(x1:float, x2:float) -> float:
 def absolute_difference(x1: float, x2: float):
     """Returns the absolute difference between two numbers."""
     return np.abs(x1-x2)
+
+def rmsd_curve(curve1:np.ndarray, curve2:np.ndarray)-> float:
+    """Calculate the RMSD between two curves."""
+    return np.linalg.norm(curve2 - curve1) / np.sqrt(curve2.size)
+
+def msd_curve(curve1:np.ndarray, curve2:np.ndarray)-> float:
+    """Calculate the MSD between two curves."""
+    return np.power(rmsd(curve2, curve1), 2)
+
+def area_between_curves(curve1:np.ndarray, curve2:np.ndarray, dx):
+    diff = np.abs(curve1-curve2)
+    area = diff * dx
+    return np.sum(area)
 
