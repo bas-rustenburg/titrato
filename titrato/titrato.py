@@ -297,16 +297,7 @@ def fixed_value_solve(x1: float,x2: float, value:float=0.0)-> Tuple[float, float
     else: 
         return x1,x2
 
-def rmsd(x1: float, x2:float) -> float:    
-    return np.sqrt((x1 -x2)**2)
 
-def msd(x1:float, x2:float) -> float:
-    """Returns the mean squared deviation between two numbers."""
-    return (x1 -x2)**2
-
-def absolute_difference(x1: float, x2: float):
-    """Returns the absolute difference between two numbers."""
-    return np.abs(x1-x2)
 
 def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]) -> pd.DataFrame:
     """Using the Hungarian algorithm (a.ka. linear sum assignment), return a mapping between experiment, and predicted pKas,
