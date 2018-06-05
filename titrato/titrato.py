@@ -56,14 +56,18 @@ def graph_to_axes(graph: Union[nx.DiGraph, nx.Graph], ax: Optional[plt.Axes]=Non
     The Axes with the plot of the graph
 
     """
-    pos = nx.spring_layout(graph)
+    colors = ["#007fff", "#e52b50", "#a4c639", "#fdee00", "#ed872d", "#966fd6", "#eeeeee", "#f4bbff", "#465945", "#a50b5e"]
+    pos = nx.spring_layout(graph, iterations=5000)
     if ax is None:
         ax = plt.gca()
     nx.draw_networkx_edges(graph, pos, ax=ax)
-    nx.draw_networkx_edge_labels(
-        graph, pos, font_size=10, font_family='sans-serif', ax=ax)
-    nx.draw_networkx_nodes(graph, pos, node_size=5000,
-                           node_color='#E5e5e5', alpha=0.3, node_shape='s', ax=ax)
+    #nx.draw_networkx_edge_labels(
+    #    graph, pos, font_size=10, font_family='sans-serif', ax=ax)
+    
+    for i,nodes in enumerate(nx.strongly_connected_components(graph)):
+        nx.draw_networkx_nodes(graph.subgraph(nodes), pos, node_size=5000,
+                           node_color=colors[i%len(colors)], alpha=0.3, node_shape='s', ax=ax)
+    
     nx.draw_networkx_labels(graph, pos, font_size=10,
                             font_family='sans-serif', ax=ax)
 
