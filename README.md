@@ -5,7 +5,7 @@ titrato
 [![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/choderalab/branch/master?svg=true)](https://ci.appveyor.com/project/choderalab/titrato/branch/master)
 [![codecov](https://codecov.io/gh/choderalab/titrato/branch/master/graph/badge.svg)](https://codecov.io/gh/choderalab/titrato/branch/master)
 
-Utilities for calculating titration curves.
+Utilities for calculating titration curves. Python 3.6+ only.
 
 ### Copyright
 
