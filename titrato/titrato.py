@@ -8,7 +8,9 @@ import pandas as pd
 import holoviews as hv
 import logging
 from itertools import chain, combinations
-from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional, Callable
+# Make sure to install typing_extensions
+from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional, Callable, TypeVar
+from typing_extensions import Protocol
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
@@ -462,6 +464,33 @@ def remove_unmatched_predictions(matches: pd.DataFrame) -> pd.DataFrame:
     return matches[matches.Experimental != np.nan]
 
 
+def add_reverse_equilibrium_arrows(graph: nx.DiGraph):
+    """Adds the pKa for the reverse direction of the equilibrium to the graph.
+    
+    Parameters
+    ----------
+    graph - a pKa equilibrium represented as a networkx directional graph (DiGraph)
+
+    Notes
+    -----
+    Does not modify the graph in place.
+    You won't be able to call a topological sort on the resulting graph.
+
+    Returns
+    -------
+    Equilibrium graph with two directions
+    """
+    graph_copy = deepcopy(graph)
+
+    for from_state, to_state in graph.edges:
+        # Retrieve the edge properties
+        props = deepcopy(graph.edges[from_state, to_state])
+        # invert the Ka
+        props['pKa'] = - props['pKa']
+        # Add edge in reverse order
+        graph_copy.add_edge(to_state, from_state, **props)
+
+    return graph_copy
 
 class TitrationCurve:
     """The representation of a titration curve of multiple protonation states over a range of pH values.
@@ -545,6 +574,7 @@ class TitrationCurve:
         """
         # List of nodes (states). Order least->most protonated
         node_topology = list(nx.algorithms.dag.topological_sort(graph))
+        augmented_graph = add_reverse_equilibrium_arrows(graph)
 
         instance = cls()
         energies: List[np.ndarray] = list()
@@ -559,13 +589,16 @@ class TitrationCurve:
         # Every node is a state
         for s, state in enumerate(node_topology[1:], start=1):
             # Least number of equilibria to pass through to reach a state
-            path = nx.shortest_path(graph, reference, node_topology[s])
+            path = nx.shortest_path(augmented_graph, reference, node_topology[s])
             # The number of protons is equal to the number of equilibria traversed
             bound_protons = len(path)-1
             sumpKa = 0
             # Add pKa along edges of the path
-            for edge in range(bound_protons):
-                sumpKa += graph[path[edge]][path[edge+1]]['pKa']
+            for edge in range(bound_protons):                
+                sumpKa += augmented_graph[path[edge]][path[edge+1]]['pKa']
+                # For reverse paths, deduct one proton
+                if not graph.has_edge(path[edge],path[edge+1]):
+                    bound_protons -= 1
 
             # Free energy calculated according to Ullmann (2003).
             energies.append(free_energy_from_pka(

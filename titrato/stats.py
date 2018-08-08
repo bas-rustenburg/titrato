@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import stats
-from typing import Tuple
+from typing import Tuple, Union
 
 def pearson_with_confidence(x:np.ndarray,y:np.ndarray, α: float)-> Tuple[float,float,float]: 
     """
@@ -57,3 +57,17 @@ def area_between_curves(curve1:np.ndarray, curve2:np.ndarray, dx):
     area = diff * dx
     return np.sum(area)
 
+def gaussian_bootstrap_sample(mean:Union[np.ndarray,float], sd: float, bias:float) -> Union[np.ndarray, float]:
+    """Return a sample from a Gaussian bootstrap distribution.
+    
+    Parameters
+    ----------
+    mean - average value of the bootstrap distribution
+    sd - standard deviation of the boostrap distribution
+    bias - bias of the bootstrap distribution.    
+    """
+    return np.random.normal(mean, sd)
+    
+    
+
+    

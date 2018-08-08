@@ -9,8 +9,7 @@ import warnings
 import os
 import matplotlib
 from matplotlib import pyplot as plt 
-from typing import Tuple, Optional, List
-
+from typing import List, Tuple, Dict, Callable, Union, Optional, Any, TypeVar
 
 def get_typei_pka_data(
     molecule_name: str, datafile: str, header: Optional[int] = 0
@@ -183,11 +182,11 @@ class TypeIPrediction(TitrationCurve):
         cls,
         mol_id: str,
         datafile: str,
-        n_samples: int,
-        n_bootstrap: int,
+        n_samples: Optional[int] = 1,
+        n_bootstrap: Optional[int]= 500,
         header: int = 0,
         drop_nodes: Optional[List[str]] = None,
-    ) -> Tuple:
+    ):
         """Retrieve the titration curve for one molecule from typeI predicted micropKas.
         
         Parameters
@@ -211,7 +210,7 @@ class TypeIPrediction(TitrationCurve):
             for node in drop_nodes:
                 graph.remove_node(node)
 
-        instances = list()
+        instances: List[TitrationCurve] = list()
         for bootstrap_sample in range(n_bootstrap):
             bootstrap_copy = data.copy()
             bootstrap_copy["pKa"] = bootstrap_copy.apply(lambda row: np.random.normal(row["pKa"], row["SEM"] * np.sqrt(n_samples)), axis=1,)
@@ -309,7 +308,8 @@ class TypeIIIPrediction(TitrationCurve):
         return instance
 
     @classmethod
-    def bootstrap_from_id(cls, mol_id: str, datafile, n_bootstrap, n_samples,header: int = 0):
+    def bootstrap_from_id(cls, mol_id: str, datafile:str ,n_samples: Optional[int] = 1,
+        n_bootstrap: Optional[int]= 500,header: int = 0):
         """
         Retrieve the titration curve for one molecule from typeIII predicted macropKas.
 
@@ -324,7 +324,7 @@ class TypeIIIPrediction(TitrationCurve):
         """
         data = get_typeiii_pka_data(mol_id, datafile, header)
 
-        instances = list()
+        instances: List[TypeIIIPrediction] = list()
         for bootstrap_sample in range(n_bootstrap):
             bootstrap_copy = data.copy()
             bootstrap_copy["pKa"] = bootstrap_copy.apply(lambda row: np.random.normal(row["pKa"], row["SEM"] * np.sqrt(n_samples)), axis=1,)
@@ -381,7 +381,8 @@ class SAMPL6Experiment(TitrationCurve):
         return instance
 
     @classmethod
-    def bootstrap_from_id(cls, mol_id: str, n_bootstrap, n_samples=3, datafile: Optional[str] = None):
+    def bootstrap_from_id(cls, mol_id: str, datafile: Optional[str] = None, n_samples: Optional[int] = 3,
+        n_bootstrap: Optional[int]= 500):
         """Retrieve the titration curve for one molecule from the experiment.
 
         Parameters
@@ -434,64 +435,6 @@ class SAMPL6Experiment(TitrationCurve):
             self.free_energies = free_energy_from_population(self.populations)
         self.state_ids.append("Unobserved")
 
-def get_percentiles(array, percentiles):
-    nums = list()
-    for q in percentiles:
-        nums.append(np.percentile(array, q, axis=0))
-    return nums
-
-def plot_quantiles(curves: np.ndarray, ph_range:np.ndarray, color:str , perc: float=5, fill=True):
-    """Plot the median, and outer percentiles.
-    
-    Parameters
-    ----------
-    curves - 2D array of bootstrap titration curves, with the 0 axis being the different curves, anx the 1 axis the pH values.
-    ph_range - the ph values that each point corresponds to.
-    color - a matplotlib color for the elements in the plot
-    perc - percentile, and 100-percentile to plot 
-        default 5, so 5th and 95th are plotted.
-    fill - fill the area between percentiles with color.
-    """
-    quantiles = get_percentiles(curves, [50., perc, 100.-perc])               
-    plt.plot(ph_range, quantiles[0], '-', color=color,alpha=1.0, label="median")
-    plt.plot(ph_range, quantiles[1], ':', color=color,alpha=1.0, label="{:.0f}th/{:.0f}th percentile".format(perc, 100-perc))
-    plt.plot(ph_range, quantiles[2], ':', color=color,alpha=1.0)
-    if fill:
-        plt.fill_between(ph_range, quantiles[2],quantiles[1], facecolor=color, alpha=0.1)
-
-def plot_mean_twosigma(curves:np.ndarray, ph_range:np.ndarray, color: str, fill=True):
-    """Plot the mean, plus/minus 2 sigma.
-    
-    Parameters
-    ----------
-    curves - 2D array of bootstrap titration curves, with the 0 axis being the different curves, anx the 1 axis the pH values.
-    ph_range - the ph values that each point corresponds to.
-    color - a matplotlib color for the elements in the plot    
-    fill - fill the area between +/- 2 sigma with color.
-    """
-    mean = np.mean(curves, axis=0)
-    std = np.std(curves,axis=0)
-    plt.plot(ph_range, mean, '-', color=color, label="mean")
-    plt.plot(ph_range, mean+2*std,':', alpha=1.0, color=color, label=r"$\pm$2$\sigma$")
-    plt.plot(ph_range, mean-2*std, ':', alpha=1.0, color=color)
-    if fill:
-        plt.fill_between(ph_range, mean+2*std, mean-2*std, facecolor=color, alpha=0.1)
-
-def plot_subset(curves, ph_range, n_choices: int, color='gray', alpha=0.1):
-    """Plot a subset of bootstrap samples.    
-    
-    Parameters
-    ----------
-    curves - 2D array of bootstrap titration curves, with the 0 axis being the different curves, anx the 1 axis the pH values.
-    ph_range - the ph values that each point corresponds to.
-    n_choices - number of samples to plot
-    color - a matplotlib color for the elements in the plot
-    alpha - transparency of the curves.
-
-    """
-    choices = np.random.choice(curves.shape[0] ,n_choices, replace=False)
-    for i in choices:
-        plt.plot(ph_range, curves[i], '-', color=color, zorder=0, alpha=alpha)
 
 def bootstrap_comparison(molecule:str, prediction_file:str, datatype:str, n_samples=1, n_bootstrap=1000, **kwargs):
     """Perform a bootstrap analysis on the experimental and the computed titration curve.
@@ -518,4 +461,100 @@ def bootstrap_comparison(molecule:str, prediction_file:str, datatype:str, n_samp
         Δ = area_between_curves(curve.mean_charge, exp_curve.mean_charge, 0.1)
         df.loc[i] = [molecule, Δ]
 
-    return df
+# TitrationCurveType defines a type that has to be one of the subclasses below
+# Easier shorthand than having to use Union everywhere
+TitrationCurveType = Union[
+    TitrationCurve, TypeIPrediction, TypeIIPrediction, TypeIIIPrediction
+]
+
+class SAMPL6DataProvider:
+    """Structured SAMPL6 prediction data provisioning.    
+
+    This class allows data to be located and described, and to load a single molecule at
+    a later time and return data as a list.
+    """
+
+    def __init__(
+        self,
+        data_file: str,
+        data_type: str,
+        method_desc: str,
+        load_options: Dict[str, Any] = None,
+        bootstrap_options: Dict[str, Any] = None,
+    ) -> None:
+        """Store parameters for this prediction method
+
+        Parameters
+        ----------
+        data_file - location of the data
+        data_type - type of the data
+        method_desc - short name for method, for use in output file names/paths        
+        load_options - extra options that can be used to load the data such as:
+            header - integer index for the file header, set to None if no header [All types]
+            drop_nodes - drop these states from generating the graph. [Type I]
+            charge_file - location of charge specification file [Type II]
+            charge_header - integer index for the header in the charge file, set to None for file without headers [Type II]
+        bootstrap_options - extra options to specify how to boostrap over data [Type I, Type III]
+            n_samples - the number of samples over which the SEM was determined
+            n_bootstrap - number of curves to return
+
+        """
+        data_file = data_file.strip()
+        self.file_path = os.path.abspath((data_file))
+        self.data_type = data_type.lower()
+        self.method_desc = method_desc.strip()
+        self.load_opts = dict() if load_options is None else load_options
+        self.bootstrap_opts = dict() if bootstrap_options is None else bootstrap_options
+
+        bootstrapkwargs = dict(**self.load_opts, **self.bootstrap_opts)
+
+        if " " in self.method_desc or "_" in self.method_desc:
+            raise ValueError(
+                "Please provide a method descriptor without spaces or underscores for LaTeX filename compatibility."
+            )
+        if self.data_type not in ["typei", "typeii", "typeiii", "exp"]:
+            raise ValueError("Please provide a valid data type.")
+        self.load: Callable[[str], TitrationCurveType]
+        self.bootstrap: Callable[
+            [str],
+            Union[
+                Tuple[TitrationCurveType, List[TitrationCurveType]], Tuple[None, None]
+            ],
+        ]
+
+        if self.data_type == "typei":
+            self.load = lambda mol_id: TypeIPrediction.from_id(
+                mol_id, self.file_path, **self.load_opts
+            )
+            self.can_bootstrap = True
+
+            self.bootstrap = lambda mol_id: TypeIPrediction.bootstrap_from_id(
+                mol_id, self.file_path, **bootstrapkwargs
+            )
+        elif self.data_type == "typeii":
+            if "charge_file" not in self.load_opts:
+                raise KeyError(
+                    "Please provide a charge specification file for Type II predictions."
+                )
+            charge_file = self.load_opts.pop("charge_file")
+            self.load = lambda mol_id: TypeIIPrediction.from_id(
+                mol_id, self.file_path, charge_file, **self.load_opts
+            )
+            self.can_bootstrap = False
+            self.bootstrap = lambda mol_id: (None, None)
+        elif self.data_type == "typeiii":
+            self.load = lambda mol_id: TypeIIIPrediction.from_id(
+                mol_id, self.file_path, **self.load_opts
+            )
+            self.can_bootstrap = True
+            self.bootstrap = lambda mol_id: TypeIIIPrediction.bootstrap_from_id(
+                mol_id, self.file_path, **bootstrapkwargs
+            )
+        elif self.data_type == "exp":
+            self.load = lambda mol_id: SAMPL6Experiment.from_id(mol_id, self.file_path)
+            self.can_bootstrap = True
+            self.bootstrap = lambda mol_id: SAMPL6Experiment.bootstrap_from_id(
+                mol_id, self.file_path, **bootstrapkwargs
+            )
+
+        return
