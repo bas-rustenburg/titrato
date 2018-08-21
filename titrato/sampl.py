@@ -11,9 +11,21 @@ import matplotlib
 from matplotlib import pyplot as plt 
 from typing import List, Tuple, Dict, Callable, Union, Optional, Any, TypeVar
 
+sampl6_charges_file = os.path.join(data_dir, "SAMPL6_microstate_charges.csv")
+
+def read_epik_formal_charge(prop_csvfile:str )-> int:
+    """
+    Read the formal charge at pH 7.0 from an epik sequential run from an atom props file.
+    """
+
+    df = pd.read_csv(prop_csvfile, header=0)
+    return int(df['i_m_formal_charge'].sum())
+
+
+
 def get_typei_pka_data(
     molecule_name: str, datafile: str, header: Optional[int] = 0
-) -> Tuple[DiGraph, pd.DataFrame]:
+) -> pd.DataFrame:
     """Retrieve type I pka data for a single molecule from the datafile.
     
     Parameters
@@ -51,41 +63,28 @@ def create_graph_from_typei_df(mol_frame):
 
 def get_typeii_logp_data(
     molecule_name: str,
-    datafile,
-    charge_file: str,
-    header: Optional[int] = 0,
-    charge_header: Optional[int] = 0,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    datafile,    
+    header: Optional[int] = 0
+) -> pd.DataFrame:
     """Retrieve type II log population data for a single molecule from the datafile.
     
     Parameters
     ----------
     molecule_name - SAMPL6 identifier of the molecule.
-    datafile - location of csv file in type II format (microstate log populations)
-    charge_file - location of csv file with charges for each state. Example format:
-        Molecule,Microstate ID,Charge
-        SM01,SM01_micro001,1
-        SM01,SM01_micro002,-2
-        SM01,SM01_micro004,-1
-        .. .. .. et cetera
-    header - optional, which lines are header lines, set to None for file without headers
-    charge_header - optional, which lines are header lines in the charge file, set to None for file without headers
+    datafile - location of csv file in type II format (microstate log populations)    
+    header - optional, which lines are header lines, set to None for file without headers  
 
     Returns
     -------
     Dataframe with populations, dataframe with charges
     
-    """
-    df = pd.read_csv(datafile, header=header)
-    charges = pd.read_csv(charge_file, header=charge_header)
+    """    
+    df = pd.read_csv(datafile, header=header)    
     colnames = list(df.columns)
     colnames[0] = "Microstate ID"
     df.columns = colnames
     df["Molecule"] = df["Microstate ID"].apply(lambda id: id.split("_")[0])
-    return (
-        df[df["Molecule"] == molecule_name],
-        charges[charges["Molecule"] == molecule_name],
-    )
+    return df[df["Molecule"] == molecule_name]
 
 
 def get_typeiii_pka_data(molecule_name: str, datafile: str, header: Optional[int] = 0):
@@ -168,6 +167,7 @@ class TypeIPrediction(TitrationCurve):
         if drop_nodes is not None:
             for node in drop_nodes:
                 graph.remove_node(node)
+        
         micropKas = np.asarray(data["pKa"])
         sems = np.asarray(data["SEM"])
 
@@ -175,6 +175,10 @@ class TypeIPrediction(TitrationCurve):
         # Store data for reference
         instance.pkas = micropKas
         instance.sems = sems
+
+        instance._update_charges_from_file(sampl6_charges_file)
+        instance._pick_zero_charge_ref_state()
+                    
         return instance
 
     @classmethod
@@ -219,7 +223,10 @@ class TypeIPrediction(TitrationCurve):
             if drop_nodes is not None:
                 for node in drop_nodes:
                     bootstrap_graph.remove_node(node)
-            instances.append(cls.from_equilibrium_graph(bootstrap_graph, cls.ph_range))
+            new_instance = cls.from_equilibrium_graph(bootstrap_graph, cls.ph_range)
+            new_instance._update_charges_from_file(sampl6_charges_file)
+            new_instance._pick_zero_charge_ref_state()
+            instances.append(new_instance)
 
         micropKas = np.asarray(data["pKa"])
         sems = np.asarray(data["SEM"])
@@ -228,6 +235,8 @@ class TypeIPrediction(TitrationCurve):
         # Store data for reference
         instance.pkas = micropKas
         instance.sems = sems
+        instance._update_charges_from_file(sampl6_charges_file)
+        instance._pick_zero_charge_ref_state()
         return instance, instances
 
 
@@ -244,29 +253,24 @@ class TypeIIPrediction(TitrationCurve):
     def from_id(
         cls,
         molecule_name: str,
-        datafile: str,
-        charge_file: str,
-        header=0,
-        charge_header=0,
+        datafile: str,        
+        header=0,        
     ):
         """Instantiate a titration curve for one molecule from Type II predicted log populations."""
-        data, charges = get_typeii_logp_data(
+        data = get_typeii_logp_data(
             molecule_name,
-            datafile,
-            charge_file,
-            header=header,
-            charge_header=charge_header,
+            datafile,            
+            header=header,            
         )
-        state_ids = data["Microstate ID"]
-        nbound = [
-            int(charges.loc[charges["Microstate ID"] == id, "Charge"])
-            for id in state_ids
-        ]
+        
+        state_ids = data["Microstate ID"]        
         log_pop = data.iloc[:, 1:-1].values
         pop = np.exp(np.asarray(log_pop))
         # normalize
         pop /= np.sum(pop, axis=0)[None, :]
-        instance = cls.from_populations(pop, cls.ph_range, nbound, state_ids)
+        instance = cls.from_populations(pop, cls.ph_range, np.zeros(len(state_ids), int), state_ids)
+        instance._update_charges_from_file(sampl6_charges_file, charge_header=0)
+        instance._pick_zero_charge_ref_state()
         return instance
 
 
@@ -284,7 +288,7 @@ class TypeIIIPrediction(TitrationCurve):
         return
 
     @classmethod
-    def from_id(cls, mol_id: str, datafile: str, header: int = 0):
+    def from_id(cls, mol_id: str, datafile: str, header: Optional[int] = 0, charge_at_pH7: int = 0):
         """Retrieve the titration curve for one molecule from typeIII predicted macropKas.
 
         Parameters
@@ -292,7 +296,7 @@ class TypeIIIPrediction(TitrationCurve):
         mol_id - the identifier for the molecule, e.g. "SM01".
         datafile - location to take type III data from.            
         header - index of the header line in the csv file.
-
+        charge_at_pH7 - charge of most populated species at pH 7, useful for Epik sequential predictions.
         Notes
         -----
         Titration curves are defined over a pH range of 2-12 with intervals of 0.1 pH unit.
@@ -302,14 +306,22 @@ class TypeIIIPrediction(TitrationCurve):
         macropKas = np.asarray(data["pKa"])
         sems = np.asarray(data["SEM"])
         instance = cls.from_macro_pkas(macropKas, cls.ph_range)
+        # pH 7 is at the middle of the 101 element array of pH values
+        # The species is selected by the index with max value in the array
+        argmax_at_ph7 = np.argmax(instance.populations[:,50])
+        instance.charges -= instance.charges[argmax_at_ph7]
+        instance.charges += charge_at_pH7
+        instance.mean_charge = instance.charges @ instance.populations
+
         # Store data for reference
         instance.pkas = macropKas
         instance.sems = sems
+        instance._pick_zero_charge_ref_state()
         return instance
 
     @classmethod
-    def bootstrap_from_id(cls, mol_id: str, datafile:str ,n_samples: Optional[int] = 1,
-        n_bootstrap: Optional[int]= 500,header: int = 0):
+    def bootstrap_from_id(cls, mol_id: str, datafile:str ,n_samples: int = 1,
+        n_bootstrap: int= 500,header: int = 0, charge_at_pH7:int=0):
         """
         Retrieve the titration curve for one molecule from typeIII predicted macropKas.
 
@@ -317,26 +329,40 @@ class TypeIIIPrediction(TitrationCurve):
         ----------
         mol_id - the identifier for the molecule, e.g. "SM01".
         datafile - location to take type III data from.
-        n_bootstrap - number of curves to return.
-        n_samples - the number of samples over which the SEM was determined
+        n_bootstrap - default[500], number of curves to return.
+        n_samples - default[1] the number of samples over which the SEM was determined
         header - index of the header line in the csv file.    
-
+        charge_at_pH7 - charge of most populated species at pH 7, useful for Epik sequential predictions.
         """
         data = get_typeiii_pka_data(mol_id, datafile, header)
 
+        # Regular curve, no bootstrap
+        macropKas = np.asarray(data["pKa"])
+        sems = np.asarray(data["SEM"])
+        instance = cls.from_macro_pkas(macropKas, cls.ph_range)
+        instance.mean_charge = instance.charges @ instance.populations
+        # Store data for reference
+        instance.pkas = macropKas
+        instance.sems = sems
+
+        # pH 7 is at the middle of the 101 element array of pH values
+        # The species is selected by the index with max value in the array
+        argmax_at_ph7 = np.argmax(instance.populations[:,50])
+        instance.charges -= instance.charges[argmax_at_ph7]
+        instance.charges += charge_at_pH7
+        instance.mean_charge
+        instance._pick_zero_charge_ref_state()
+
+        # Bootstrap pKa values
         instances: List[TypeIIIPrediction] = list()
         for bootstrap_sample in range(n_bootstrap):
             bootstrap_copy = data.copy()
             bootstrap_copy["pKa"] = bootstrap_copy.apply(lambda row: np.random.normal(row["pKa"], row["SEM"] * np.sqrt(n_samples)), axis=1,)
-            instances.append(cls.from_macro_pkas(np.asarray(bootstrap_copy["pKa"]), cls.ph_range))
-        # Store data for reference
-
-        macropKas = np.asarray(data["pKa"])
-        sems = np.asarray(data["SEM"])
-        instance = cls.from_macro_pkas(macropKas, cls.ph_range)
-        # Store data for reference
-        instance.pkas = macropKas
-        instance.sems = sems
+            new_instance = cls.from_macro_pkas(np.asarray(bootstrap_copy["pKa"]), cls.ph_range)
+            new_instance.charges = instance.charges
+            new_instance.mean_charge = new_instance.charges @ new_instance.populations
+            new_instance._pick_zero_charge_ref_state()
+            instances.append(new_instance)
         return instance, instances
 
 
@@ -378,6 +404,7 @@ class SAMPL6Experiment(TitrationCurve):
         # Store data for reference
         instance.pkas = macropKas
         instance.sems = sems
+        instance._pick_zero_charge_ref_state()
         return instance
 
     @classmethod
@@ -415,6 +442,7 @@ class SAMPL6Experiment(TitrationCurve):
         instance = cls.from_macro_pkas(macropKas, cls.ph_range)
         instance.pkas = macropKas
         instance.sems = sems
+        instance._pick_zero_charge_ref_state()
         return instance, instances
 
     def add_unobserved_state(self):
@@ -481,6 +509,7 @@ class SAMPL6DataProvider:
         method_desc: str,
         load_options: Dict[str, Any] = None,
         bootstrap_options: Dict[str, Any] = None,
+        typeiii_charge_file: Optional[str] = None
     ) -> None:
         """Store parameters for this prediction method
 
@@ -491,12 +520,15 @@ class SAMPL6DataProvider:
         method_desc - short name for method, for use in output file names/paths        
         load_options - extra options that can be used to load the data such as:
             header - integer index for the file header, set to None if no header [All types]
-            drop_nodes - drop these states from generating the graph. [Type I]
-            charge_file - location of charge specification file [Type II]
-            charge_header - integer index for the header in the charge file, set to None for file without headers [Type II]
+            drop_nodes - drop these states from generating the graph. [Type I]            
         bootstrap_options - extra options to specify how to boostrap over data [Type I, Type III]
             n_samples - the number of samples over which the SEM was determined
             n_bootstrap - number of curves to return
+        typeiii_charge_file - csv file to retrieve charge of most populated species at pH 7 from.
+            Format: 
+                Molecule, Charge
+                SM01, 0
+                etc ... 
 
         """
         data_file = data_file.strip()
@@ -505,7 +537,9 @@ class SAMPL6DataProvider:
         self.method_desc = method_desc.strip()
         self.load_opts = dict() if load_options is None else load_options
         self.bootstrap_opts = dict() if bootstrap_options is None else bootstrap_options
+        self._typeiii_charge_file = typeiii_charge_file
 
+        
         bootstrapkwargs = dict(**self.load_opts, **self.bootstrap_opts)
 
         if " " in self.method_desc or "_" in self.method_desc:
@@ -531,24 +565,19 @@ class SAMPL6DataProvider:
             self.bootstrap = lambda mol_id: TypeIPrediction.bootstrap_from_id(
                 mol_id, self.file_path, **bootstrapkwargs
             )
-        elif self.data_type == "typeii":
-            if "charge_file" not in self.load_opts:
-                raise KeyError(
-                    "Please provide a charge specification file for Type II predictions."
-                )
-            charge_file = self.load_opts.pop("charge_file")
+        elif self.data_type == "typeii":            
             self.load = lambda mol_id: TypeIIPrediction.from_id(
-                mol_id, self.file_path, charge_file, **self.load_opts
+                mol_id, self.file_path,  **self.load_opts
             )
             self.can_bootstrap = False
             self.bootstrap = lambda mol_id: (None, None)
         elif self.data_type == "typeiii":
             self.load = lambda mol_id: TypeIIIPrediction.from_id(
-                mol_id, self.file_path, **self.load_opts
+                mol_id, self.file_path, **self.load_opts, charge_at_pH7=self._find_typeiii_charge(mol_id)
             )
             self.can_bootstrap = True
             self.bootstrap = lambda mol_id: TypeIIIPrediction.bootstrap_from_id(
-                mol_id, self.file_path, **bootstrapkwargs
+                mol_id, self.file_path, **bootstrapkwargs, charge_at_pH7=self._find_typeiii_charge(mol_id)
             )
         elif self.data_type == "exp":
             self.load = lambda mol_id: SAMPL6Experiment.from_id(mol_id, self.file_path)
@@ -558,3 +587,13 @@ class SAMPL6DataProvider:
             )
 
         return
+
+    def _find_typeiii_charge(self, mol_id:str)->int:
+        """Retrieve charge for a mol ID."""
+        if self._typeiii_charge_file is None:
+            return 0
+
+        else:
+            df = pd.read_csv(self._typeiii_charge_file, header=0)
+            return int(df[df["Molecule"]==mol_id].iloc[0]["Charge"])
+        

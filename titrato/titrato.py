@@ -502,7 +502,7 @@ class TitrationCurve:
     ph_values - 1D array of pH values corresponding to the pH of the other arrays
     state_ids - 1D array of identifiers for each state
     mean_charge - 2D array indexed by [state, pH] of the mean molecular charge at each pH value (relative to state 0)
-    nbound - 1D array of number of protons bound to each state
+    charge - 1D array of the charge assigned to each state
     """
 
     def __init__(self):
@@ -513,7 +513,39 @@ class TitrationCurve:
         self.ph_values = None
         self.state_ids = None
         self.mean_charge = None
-        self.nbound = None
+        self.charges = None        
+
+    def _update_charges_from_file(self,charge_file, charge_header=0):
+        """"""
+        # Charge data from standard file
+        charges = pd.read_csv(charge_file, header=charge_header)
+        for idx,state in enumerate(self.state_ids):
+            charge = charges[charges['Microstate ID'] == state]['Charge'].iloc[0]            
+            self.charges[idx] = charge
+        
+        self.mean_charge = self.charges @ self.populations
+        return
+
+    def _set_free_energy_reference_state(self, state_index: int):
+        """Correct the relative free energy with respect to one state."""
+        self.free_energies -= np.squeeze(self.free_energies[state_index])
+
+    def _pick_zero_charge_ref_state(self):
+        """Find the lowest free energy state with charge equals 0, and set that as reference."""
+        zeros = np.atleast_1d(np.squeeze(np.where(self.charges==0)))
+        
+        if zeros.size < 1:
+            return
+
+        min_free = 1.e16 # large number
+        final_zero = None
+        for zero in zeros:
+            # Just check the first free energy for each state, since supposedly all parallel
+            free_ene = deepcopy(self.free_energies[zero, 0])            
+            if free_ene < min_free:
+                min_free = free_ene
+                final_zero = zero
+        self._set_free_energy_reference_state(final_zero)
 
     @classmethod
     def from_micro_pkas(cls, micropkas: np.ndarray, ph_values: np.ndarray):
@@ -548,8 +580,8 @@ class TitrationCurve:
             instance.free_energies)
         instance.ph_values = ph_values
         instance.state_ids = state_ids
-        instance.nbound = np.asarray(nbound)
-        instance.mean_charge = instance.nbound @ instance.populations
+        instance.charges = np.asarray(nbound)
+        instance.mean_charge = instance.charges @ instance.populations
         # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
 
@@ -610,8 +642,8 @@ class TitrationCurve:
             instance.free_energies)
         instance.ph_values = ph_values
         instance.state_ids = node_topology
-        instance.nbound = np.asarray(nbound)
-        instance.mean_charge = instance.nbound @ instance.populations
+        instance.charges = np.asarray(nbound)
+        instance.mean_charge = instance.charges @ instance.populations
          # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
 
@@ -639,8 +671,8 @@ class TitrationCurve:
             state_ids.append(f"+{n:d} protons (pKa={pKa:.2f})")
             nbound.append(n)
         instance.state_ids = state_ids
-        instance.nbound = np.asarray(nbound)
-        instance.mean_charge = instance.nbound @ instance.populations
+        instance.charges = np.asarray(nbound)
+        instance.mean_charge = instance.charges @ instance.populations
          # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
         
@@ -675,8 +707,8 @@ class TitrationCurve:
         instance.populations = populations
         instance.free_energies = free_energy_from_population(populations)
         instance.ph_values = ph_values
-        instance.nbound = np.asarray(nbound)
-        instance.mean_charge = instance.nbound @ instance.populations
+        instance.charges = np.asarray(nbound)
+        instance.mean_charge = instance.charges @ instance.populations
          # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
 
@@ -701,9 +733,9 @@ class TitrationCurve:
         """
 
         # Grab charge curves, and ensure lowest value is 0.
-        q1 = other_curve.mean_charge
+        q1 = deepcopy(other_curve.mean_charge)
         q1 -= int(round(min(q1)))    
-        q2 = self.mean_charge
+        q2 = deepcopy(self.mean_charge)
         q2 -=int(round(min(q2)))
         
         max1 = int(round(max(q1)))
@@ -712,11 +744,11 @@ class TitrationCurve:
         # Maximum range of the alignment is from -max, max
         m = max([max1,max2])
         distance = 1.e16
-        aligned_q2 = q2
+        aligned_q2 = deepcopy(q2)
         offset = 0
         for i in range(-m,m+1):
             new_q2 = q2 + i
-            new_distance = distance_function(q1, new_q2, *args)            
+            new_distance = distance_function(other_curve.mean_charge, new_q2, *args)            
             if new_distance < distance:
                 distance = new_distance
                 aligned_q2 = new_q2
