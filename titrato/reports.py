@@ -10,7 +10,8 @@ from .sampl import (
     TypeIIIPrediction,
     SAMPL6Experiment,
     TitrationCurveType,
-    SAMPL6DataProvider
+    SAMPL6DataProvider,
+    bootstrap_rmse_r
 )
 from .stats import area_between_curves
 import pandas as pd
@@ -18,11 +19,13 @@ import seaborn as sns
 from shutil import copyfile
 import string
 from copy import deepcopy 
+from math import ceil, floor
 
 # Default styling
 sns.set_style("ticks")
 glob_font = {"size": 11}
 matplotlib.rc("font", **glob_font)
+matplotlib.rc('lines', **{'markersize': 4}) 
 
 import os
 
@@ -107,13 +110,13 @@ class MethodResultRow(TexBlock):
         "\\end{{minipage}}\n"
         "\n\\noindent\n"
         "\\begin{{minipage}}[s]{{0.33\\textwidth}}\\centering\n"
-        "\\includegraphics[scale=1]{{Reports/\\method{id}-virtual-titration-\\molid.\\imgext}}\n"
+        "\\includegraphics[width=\\textwidth]{{Reports/\\method{id}-virtual-titration-\\molid.\\imgext}}\n"
         "\\end{{minipage}}\n"
         "\\begin{{minipage}}[s]{{0.33\\textwidth}}\n"
-        "\\includegraphics[scale=1]{{Reports/\\method{id}-free-energy-\\molid.\\imgext}}\n"
+        "\\includegraphics[\\textwidth]{{Reports/\\method{id}-free-energy-\\molid.\\imgext}}\n"
         "\\end{{minipage}}\n"
         "\\begin{{minipage}}[s]{{0.33\\textwidth}}\n"
-        "\\includegraphics[scale=1]{{Reports/\\method{id}-populations-\\molid.\\imgext}}\n"
+        "\\includegraphics[\\textwidth]{{Reports/\\method{id}-populations-\\molid.\\imgext}}\n"
         "\\end{{minipage}}\n"
     )
 
@@ -137,15 +140,15 @@ class SAMPL6ReportGenerator:
         "figsize": (2.0, 2.0), # 3 figures fitting between 3 cm margins on letter paper
         "line_styles": ["-", "--", "-.", ":"],        
         "colors_per_charge": {
-            0: "#333333",
-            1: "#00b3b3",
-            2: "#00994d",            
-            3: "#006bb3",            
-            4: "#808080",
-            -1: "#ffcc00",            
-            -2: "#ff751a",            
-            -3: "#e60000",
-            -4: "#8600b3",            
+           -4 : "#470911",
+           -3 : "#b2182b",
+           -2: "#d6604d",
+           -1: "#f4a582",           
+           0: "#333333",            
+            1:"#92c5de",
+            2:"#4393c3",
+            3:"#2166ac",           
+            4:"#0d2844"
         },
         # default seaborn color palette
         "extra_colors": sns.color_palette(),
@@ -194,20 +197,20 @@ class SAMPL6ReportGenerator:
             ax.plot([0,1],[0,1], color=color, label = f'{charge:d}')
         # Separate legend figure
         figlegend, axlegend = plt.subplots(
-            1, 1, figsize=[4,2], dpi=self._figprops["dpi"]
+            1, 1, figsize=[8,0.5], dpi=self._figprops["dpi"]
         )
         handles, labels = ax.get_legend_handles_labels()
         # handles = np.concatenate((handles[::2],handles[1::2]),axis=0)
         # labels = np.concatenate((labels[::2],labels[1::2]),axis=0)
              
-        leg = figlegend.legend(handles, labels, loc="center",ncol=5)        
+        leg = figlegend.legend(handles, labels, loc="center",ncol=9)        
         axlegend.get_xaxis().set_visible(False)
         axlegend.get_yaxis().set_visible(False)
         for spine in ["top", "left", "bottom", "right"]:
             axlegend.spines[spine].set_visible(False)
         
         self._figures["overview"]["charge-legend"] = figlegend
-        fig.close()
+        plt.close(fig)
 
     def make_all_plots(self):
         """Make all available plots for each prediction and the experiment.."""
@@ -253,27 +256,17 @@ class SAMPL6ReportGenerator:
         Also stores a legend with color codes for each method, that can be used with other overview figures.
         """
 
-        # All methods tested against the same experimental values.
-        exp_data = self._exp_provider.load(self._mol_id)
-        if self._exp_provider.can_bootstrap:
-            exp_data, exp_bootstrap_data = self._exp_provider.bootstrap(self._mol_id)
-            # Virtual titration curves
-            exp_curves = np.asarray([curve.mean_charge for curve in exp_bootstrap_data])
-
+        # TODO fill in the new structure for experimental plots
 
         # Overview charge titration
-        titration_fig_ax = self._newfig()
-
-        # Experiment a black solid curve
-        self._add_virtual_titration_bootstrap_sd(
-            titration_fig_ax, "Experiment", exp_data, exp_curves, 0
-        )
+        titration_fig_ax = self._newfig()        
 
         for idx, pred in enumerate(self._prediction_providers, start=1):
             desc = pred.method_desc
             if pred.can_bootstrap:
+                exp_data, exp_curves, exp_bootstrap_data = self._load_experiment_with_bootstrap()
                 pred_data, bootstrap_data = pred.bootstrap(self._mol_id)
-                pred_data.align_mean_charge(exp_data, area_between_curves, self._dpH)
+                exp_data.align_mean_charge(pred_data, area_between_curves, self._dpH)
                 # Align all to experiment curve (note this is a joint bootstrap of experiment and prediction)
                 curves = list()
                 for dat, exp_dat in zip(bootstrap_data, exp_bootstrap_data):
@@ -318,6 +311,15 @@ class SAMPL6ReportGenerator:
 
         self._figures["overview"]["virtual-titration"] = fig
         self._figures["overview"]["legend"] = figlegend
+
+    def _load_experiment_with_bootstrap(self):
+        # All methods tested against the same experimental values.
+        exp_data = self._exp_provider.load(self._mol_id)
+        if self._exp_provider.can_bootstrap:
+            exp_data, exp_bootstrap_data = self._exp_provider.bootstrap(self._mol_id)
+            # Virtual titration curves
+            exp_curves = np.asarray([curve.mean_charge for curve in exp_bootstrap_data])
+        return exp_data, exp_curves, exp_bootstrap_data
         
 
     def save_all(self, dir: str, ext="pdf"):
@@ -464,6 +466,18 @@ class SAMPL6ReportGenerator:
             )
         # Integer labels for y axis
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        
+        # ensure at least one integer unit of charge on axis + .1 for spacing
+        ymin, ymax = ax.get_ylim()
+        
+        round_min = round(ymin) - 0.05        
+        round_max = round(ymax) + 0.05
+        if ymax < round_max:
+            ymax = round_max
+        if ymin > round_min:
+            ymin = round_min
+        ax.set_ylim([ymin, ymax])        
+
         # WITH labels on y axis, but indicate the integer values with ticks
         labels = [item.get_text() for item in ax.get_yticklabels()]
         # empty_string_labels = [""] * len(labels)
@@ -659,3 +673,37 @@ def plot_subset(curves, ph_range, n_choices: int, color="gray", alpha=0.1):
     for i in choices:
         plt.plot(ph_range, curves[i], "-", color=color, zorder=0, alpha=alpha)
 
+def plot_correlation_analysis(dataframe:pd.DataFrame, title:str, color:str, marker:str, error_color='black', nsamples=1000):
+    """Plot correlation between experiment and prediction.
+    
+    Parameters
+    ----------
+    dataframe - a typeI/typeIII pKa dataframe
+        Has columns "Experimental" , "Experimental SEM" ,"Predicted", and "Predicted SEM"
+    title - to put above plot. use '' (empty string) for no title.
+    color - edge color of the markers. This plot uses open markers.
+    error_color - color of the error bars
+    nsamples - number of samples to draw for bootstrap
+    """    
+    rmse, r = bootstrap_rmse_r(dataframe,nsamples)
+    
+    plt.clf()
+    fig = plt.figure(figsize=[2,2], dpi=150)
+    ax = plt.gca()    
+    ax.set_title(title, fontsize=9)
+    ax.text(1.5,12.5, r"$\rho = {}$".format(r), fontsize=6)
+    ax.text(1.5,11.5, r"RMSE$ = {}$".format(rmse), fontsize=6)       
+    ax.errorbar(dataframe["Experimental"], dataframe["Predicted"], xerr=dataframe["Experimental SEM"], yerr=dataframe["Predicted SEM"], fmt='none', color=error_color, alpha =0.8,linewidth=0.5)    
+    ax.scatter(dataframe["Experimental"], dataframe["Predicted"], marker=marker, color=color, facecolors='none', edgecolors=color, alpha =0.9,linewidth=0.7)    
+    ax.plot((0.0, 14.0),(0.0, 14.0), "k--",zorder=-1,linewidth=0.5, alpha=0.5)
+    ax.plot((-1.0, 13.0),(0.0, 14.0), "gray",zorder=-1,linewidth=0.5, alpha=0.5 )
+    ax.plot((1.0, 15.0),(0.0, 14.0), "gray",zorder=-1,linewidth=0.5 , alpha=0.5)
+    ax.set_ylabel("Predicted pKa", fontsize=9)
+    ax.set_xlabel("Experimental pKa", fontsize=9)
+    ax.set_xlim([1,13])
+    ax.set_ylim([1,13])
+    plt.xticks(np.arange(2.0, 14.0, 2.0), fontsize=8)
+    plt.yticks(np.arange(2.0, 14.0, 2.0), fontsize=8)    
+    plt.tight_layout()
+    sns.despine(fig)
+    return fig,ax

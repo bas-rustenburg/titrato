@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 from .titrato import TitrationCurve, free_energy_from_population
 from .titrato import data_dir
-from .stats import area_between_curves
+from .stats import area_between_curves, BootstrapDistribution, array_rmse, PearsonRBootstrapDistribution
+from scipy.stats import pearsonr
 from networkx import DiGraph
 import warnings
 import os
@@ -20,8 +21,6 @@ def read_epik_formal_charge(prop_csvfile:str )-> int:
 
     df = pd.read_csv(prop_csvfile, header=0)
     return int(df['i_m_formal_charge'].sum())
-
-
 
 def get_typei_pka_data(
     molecule_name: str, datafile: str, header: Optional[int] = 0
@@ -46,7 +45,6 @@ def get_typei_pka_data(
 
     return mol_frame
 
-
 def create_graph_from_typei_df(mol_frame):
     """Create a graph from a typei dataframe for a single molecule."""
     # Direction of edges of the graph is deprotonated -> protonated state
@@ -59,7 +57,6 @@ def create_graph_from_typei_df(mol_frame):
     graph = DiGraph()
     graph.add_edges_from(zip(from_list, to_list, properties))
     return graph
-
 
 def get_typeii_logp_data(
     molecule_name: str,
@@ -86,7 +83,6 @@ def get_typeii_logp_data(
     df["Molecule"] = df["Microstate ID"].apply(lambda id: id.split("_")[0])
     return df[df["Molecule"] == molecule_name]
 
-
 def get_typeiii_pka_data(molecule_name: str, datafile: str, header: Optional[int] = 0):
     """Retrieve type III macroscopic pKa data for a single molecule from the data file
     
@@ -104,6 +100,40 @@ def get_typeiii_pka_data(molecule_name: str, datafile: str, header: Optional[int
     df.columns = ["Molecule", "pKa", "SEM"]
     return df[df["Molecule"] == molecule_name]
 
+def bootstrap_pKa_dataframe(original_df: pd.DataFrame) -> pd.DataFrame:
+    """Perform empirical bootstrap over rows for correlation analysis.
+    Works with type I and type III dataframes."""
+    size = original_df.shape[0]
+    rows = np.random.choice(np.arange(size), size=size)        
+    return original_df.iloc[rows].copy()
+
+    
+def bootstrap_rmse_r(df:pd.DataFrame, nsamples:int):
+    """Perform a bootstrap correlation analysis for a pKa dataframe
+    
+    Parameters
+    ----------
+    df - the original pandas dataframe with pKa data.
+    nsamples - number of bootstrap samples to draw    
+    """
+    
+    rmse_list = list()
+    rs_list = list()
+    for i in range(nsamples):
+        bootstrap_df = bootstrap_pKa_dataframe(df)
+        exp = bootstrap_df.Experimental
+        pred = bootstrap_df.Predicted
+        rmse_list.append(array_rmse(exp, pred))
+        rs_list.append(pearsonr(exp, pred)[0])
+        
+    rmse_array = np.asarray(rmse_list)
+    rs_array = np.asarray(rs_list)
+    
+    rmse = array_rmse(df.Experimental, df.Predicted)
+    rs = pearsonr(df.Experimental, df.Predicted)[0]
+    
+    
+    return BootstrapDistribution(rmse, rmse_array), PearsonRBootstrapDistribution(rs, rs_array)
 
 def get_experimental_pKa_data(
     molecule_name: str,
