@@ -194,7 +194,7 @@ class SAMPL6ReportGenerator:
         fig, ax = self._newfig()        
         for charge in range(-4,5):
             color = self._figprops["colors_per_charge"][charge]
-            ax.plot([0,1],[0,1], color=color, label = f'{charge:d}')
+            ax.plot([0,1],[0,1], color=color, label = f'{charge:+d}')
         # Separate legend figure
         figlegend, axlegend = plt.subplots(
             1, 1, figsize=[8,0.5], dpi=self._figprops["dpi"]
@@ -266,7 +266,7 @@ class SAMPL6ReportGenerator:
             if pred.can_bootstrap:
                 exp_data, exp_curves, exp_bootstrap_data = self._load_experiment_with_bootstrap()
                 pred_data, bootstrap_data = pred.bootstrap(self._mol_id)
-                exp_data.align_mean_charge(pred_data, area_between_curves, self._dpH)
+                pred_data.align_mean_charge(exp_data, area_between_curves, self._dpH)
                 # Align all to experiment curve (note this is a joint bootstrap of experiment and prediction)
                 curves = list()
                 for dat, exp_dat in zip(bootstrap_data, exp_bootstrap_data):
@@ -274,7 +274,11 @@ class SAMPL6ReportGenerator:
                     curves.append(deepcopy(dat.mean_charge))
                 curves = np.asarray(curves)
                 self._add_virtual_titration_bootstrap_sd(
-                    titration_fig_ax, desc, pred_data, curves, idx
+                    titration_fig_ax, desc, pred_data, curves, idx, linestyle="-"
+                )
+                # experiment plotted as dashed line
+                self._add_virtual_titration_bootstrap_sd(
+                    titration_fig_ax, f'{desc}-exp', exp_data, exp_curves, idx, linestyle='--', alpha=0.5,
                 )
             else:
                 pred_data = pred.load(self._mol_id)
@@ -286,12 +290,13 @@ class SAMPL6ReportGenerator:
 
         # Unpack tuple.
         fig, ax = titration_fig_ax
+        ax.set_title(f"{self._mol_id}", fontsize=9)
         # Integer labels for y axis
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         # No labels on y axis, but indicate the integer values with ticks
-        labels = [item.get_text() for item in ax.get_yticklabels()]
-        empty_string_labels = [""] * len(labels)
-        ax.set_yticklabels(empty_string_labels)
+        # labels = [item.get_text() for item in ax.get_yticklabels()]
+        # empty_string_labels = [""] * len(labels)
+        # ax.set_yticklabels(empty_string_labels)
         ax.set_ylabel("Mean charge")
         ax.set_xlabel("pH")
         # x-tick every 2 pH units
@@ -386,6 +391,8 @@ class SAMPL6ReportGenerator:
         color_idx: int,
         perc: float = 5,
         fill=False,
+        linestyle="-",
+        alpha=1.0,
     ) -> None:
         """Plot the estimate and 2 standard deviations from a bootstrap set in existing fig and axes.
         
@@ -407,9 +414,9 @@ class SAMPL6ReportGenerator:
         mean = curve.mean_charge
         # Unpack tuple
         fig, ax = fig_ax
-        ax.plot(ph_values, mean, "-", linewidth=0.75, color=color, alpha=1.0, label=label)
-        ax.plot(ph_values, mean + (2 * std), ":", linewidth=0.75, color=color, alpha=1.0)
-        ax.plot(ph_values, mean - (2 * std), ":", linewidth=0.75, color=color, alpha=1.0)
+        ax.plot(ph_values, mean, linestyle, linewidth=0.75, color=color, alpha=alpha, label=label)
+        ax.plot(ph_values, mean + (2 * std), ":", linewidth=0.75, color=color, alpha=0.5*alpha)
+        ax.plot(ph_values, mean - (2 * std), ":", linewidth=0.75, color=color, alpha=0.5*alpha)
         if fill:
             ax.fill_between(
                 ph_values,

@@ -217,7 +217,7 @@ class TypeIPrediction(TitrationCurve):
         mol_id: str,
         datafile: str,
         n_samples: Optional[int] = 1,
-        n_bootstrap: Optional[int]= 500,
+        n_bootstrap: Optional[int]= 100,
         header: int = 0,
         drop_nodes: Optional[List[str]] = None,
     ):
@@ -351,7 +351,7 @@ class TypeIIIPrediction(TitrationCurve):
 
     @classmethod
     def bootstrap_from_id(cls, mol_id: str, datafile:str ,n_samples: int = 1,
-        n_bootstrap: int= 500,header: int = 0, charge_at_pH7:int=0):
+        n_bootstrap: int= 100,header: int = 0, charge_at_pH7:int=0):
         """
         Retrieve the titration curve for one molecule from typeIII predicted macropKas.
 
@@ -439,7 +439,7 @@ class SAMPL6Experiment(TitrationCurve):
 
     @classmethod
     def bootstrap_from_id(cls, mol_id: str, datafile: Optional[str] = None, n_samples: Optional[int] = 3,
-        n_bootstrap: Optional[int]= 500):
+        n_bootstrap: Optional[int]= 100):
         """Retrieve the titration curve for one molecule from the experiment.
 
         Parameters

@@ -530,22 +530,50 @@ class TitrationCurve:
         """Correct the relative free energy with respect to one state."""
         self.free_energies -= np.squeeze(self.free_energies[state_index])
 
-    def _pick_zero_charge_ref_state(self):
+    def _pick_zero_charge_ref_state(self, fallback=True):
         """Find the lowest free energy state with charge equals 0, and set that as reference."""
         zeros = np.atleast_1d(np.squeeze(np.where(self.charges==0)))
         
         if zeros.size < 1:
             return
-
         min_free = 1.e16 # large number
         final_zero = None
+        updated = False
         for zero in zeros:
+            # If state isn't present/populated, all around cant use it as a reference
+            if np.isnan(self.free_energies[zero]).any() or np.isinf(self.free_energies[zero]).any():
+                continue
             # Just check the first free energy for each state, since supposedly all parallel
-            free_ene = deepcopy(self.free_energies[zero, 0])            
+            free_ene = deepcopy(self.free_energies[zero, 0])
             if free_ene < min_free:
                 min_free = free_ene
                 final_zero = zero
-        self._set_free_energy_reference_state(final_zero)
+                updated = True
+
+        if updated:
+            self._set_free_energy_reference_state(final_zero)
+        # attempt using a charged state as reference.
+        elif fallback:
+            warnings.warn("No contiguous neutral state present. Using a charged state as reference.", RuntimeWarning)
+            min_free = 1.e16  # large number
+            final_zero = None
+            updated = False
+            for idx in range(self.free_energies.shape[0]):
+                # If state isn't present/populated, all around cant use it as a reference
+                if np.isnan(self.free_energies[idx]).any() or np.isinf(self.free_energies[idx]).any():
+                    continue
+                # Just check the first free energy for each state, since supposedly all parallel
+                free_ene = deepcopy(self.free_energies[idx, 0])
+                if free_ene < min_free:
+                    min_free = free_ene
+                    final_zero = idx
+                    updated = True
+            if updated:
+                self._set_free_energy_reference_state(final_zero)
+            else:
+                warnings.warn("Could not find any contiguous state.", RuntimeWarning)
+        else:
+            warnings.warn("Could not find an appropriate neutral reference state.", RuntimeWarning)
 
     @classmethod
     def from_micro_pkas(cls, micropkas: np.ndarray, ph_values: np.ndarray):
@@ -705,11 +733,11 @@ class TitrationCurve:
         instance = cls()
         instance.state_ids = state_ids
         instance.populations = populations
-        instance.free_energies = free_energy_from_population(populations)
+        instance.free_energies = - np.log(populations) # unnormalized
         instance.ph_values = ph_values
         instance.charges = np.asarray(nbound)
         instance.mean_charge = instance.charges @ instance.populations
-         # Set lowest value to 0
+        # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
 
         return instance
