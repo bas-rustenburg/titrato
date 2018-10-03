@@ -281,6 +281,7 @@ class SAMPL6ReportGenerator:
                     titration_fig_ax, f'{desc}-exp', exp_data, exp_curves, idx, linestyle='--', alpha=0.5,
                 )
             else:
+                exp_data = self._exp_provider.load(self._mol_id)
                 pred_data = pred.load(self._mol_id)
                 pred_data.align_mean_charge(exp_data, area_between_curves, self._dpH)
                 curve = pred_data.mean_charge
