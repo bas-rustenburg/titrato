@@ -10,7 +10,7 @@ build:
 
 requirements:
   build:
-    - python
+    - python=3.7
     - setuptools    
 
   run:
@@ -21,6 +21,10 @@ requirements:
     - matplotlib
     - pandas
     - networkx
+    - pydot
+    - adjusttext
+    - numexpr
+    - typing_extensions
 
 test:
   requires:
