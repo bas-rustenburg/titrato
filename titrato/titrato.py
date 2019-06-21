@@ -8,15 +8,29 @@ import pandas as pd
 import holoviews as hv
 import logging
 from itertools import chain, combinations
+
 # Make sure to install typing_extensions
-from typing import Dict, List, Iterator, Union, Iterable, Tuple, Any, Optional, Callable, TypeVar
+from typing import (
+    Dict,
+    List,
+    Iterator,
+    Union,
+    Iterable,
+    Tuple,
+    Any,
+    Optional,
+    Callable,
+    TypeVar,
+)
 from typing_extensions import Protocol
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
+import sys
 import warnings
 from . import data_dir
 from scipy.optimize import linear_sum_assignment
+from scipy.stats import linregress
 import math
 from copy import deepcopy
 
@@ -27,10 +41,18 @@ ln10 = np.log(10)
 
 # Keep track of papers that we take equations from
 references = [
-    "RI Allen et al J Pharm Biomed Anal 17 (1998) 699-712", "Ullmann, J Phys Chem B vol 107, No 5, 2003. 1263-1271", "Mehtap Isik et al, to be submitted to JCAMD 2018"]
+    "RI Allen et al J Pharm Biomed Anal 17 (1998) 699-712",
+    "Ullmann, J Phys Chem B vol 107, No 5, 2003. 1263-1271",
+    "Mehtap Isik et al, to be submitted to JCAMD 2018",
+]
 
 
-def quicksave(plot_object: Any, outfile_basename: str, renderer: str='matplotlib', fmt: Optional[str]=None) -> None:
+def quicksave(
+    plot_object: Any,
+    outfile_basename: str,
+    renderer: str = "matplotlib",
+    fmt: Optional[str] = None,
+) -> None:
     """Quicksave function for a holoviews plot to a standalone html file.
 
     Parameters
@@ -44,7 +66,9 @@ def quicksave(plot_object: Any, outfile_basename: str, renderer: str='matplotlib
     return
 
 
-def graph_to_axes(graph: Union[nx.DiGraph, nx.Graph], ax: Optional[plt.Axes]=None) -> plt.Axes:
+def graph_to_axes(
+    graph: Union[nx.DiGraph, nx.Graph], ax: Optional[plt.Axes] = None
+) -> plt.Axes:
     """
     Plot a graph with labels on edges, and nodes.
 
@@ -58,25 +82,44 @@ def graph_to_axes(graph: Union[nx.DiGraph, nx.Graph], ax: Optional[plt.Axes]=Non
     The Axes with the plot of the graph
 
     """
-    colors = ["#007fff", "#e52b50", "#a4c639", "#fdee00", "#ed872d", "#966fd6", "#eeeeee", "#f4bbff", "#465945", "#a50b5e"]
+    colors = [
+        "#007fff",
+        "#e52b50",
+        "#a4c639",
+        "#fdee00",
+        "#ed872d",
+        "#966fd6",
+        "#eeeeee",
+        "#f4bbff",
+        "#465945",
+        "#a50b5e",
+    ]
     pos = nx.spring_layout(graph, iterations=5000)
     if ax is None:
         ax = plt.gca()
     nx.draw_networkx_edges(graph, pos, ax=ax)
-    #nx.draw_networkx_edge_labels(
+    # nx.draw_networkx_edge_labels(
     #    graph, pos, font_size=10, font_family='sans-serif', ax=ax)
-    
-    for i,nodes in enumerate(nx.strongly_connected_components(graph)):
-        nx.draw_networkx_nodes(graph.subgraph(nodes), pos, node_size=5000,
-                           node_color=colors[i%len(colors)], alpha=0.3, node_shape='s', ax=ax)
-    
-    nx.draw_networkx_labels(graph, pos, font_size=10,
-                            font_family='sans-serif', ax=ax)
+
+    for i, nodes in enumerate(nx.strongly_connected_components(graph)):
+        nx.draw_networkx_nodes(
+            graph.subgraph(nodes),
+            pos,
+            node_size=5000,
+            node_color=colors[i % len(colors)],
+            alpha=0.3,
+            node_shape="s",
+            ax=ax,
+        )
+
+    nx.draw_networkx_labels(graph, pos, font_size=10, font_family="sans-serif", ax=ax)
 
     return ax
 
 
-def free_energy_from_pka(bound_protons: int, Σ_pKa: float, pH: np.ndarray) -> np.ndarray:
+def free_energy_from_pka(
+    bound_protons: int, Σ_pKa: float, pH: np.ndarray,
+) -> np.ndarray:
     """This function calculates the energy of a state based on unbound protons, pH and the pKa
 
     bound_protons - Number of protons bound to this state
@@ -95,7 +138,7 @@ def free_energy_from_pka(bound_protons: int, Σ_pKa: float, pH: np.ndarray) -> n
     """
     nμ = bound_protons * pH
     G = -Σ_pKa
-    return (nμ+G) * ln10
+    return (nμ + G) * ln10 
 
 
 def populations_from_free_energies(free_energies: np.ndarray) -> np.ndarray:
@@ -111,11 +154,11 @@ def populations_from_free_energies(free_energies: np.ndarray) -> np.ndarray:
     """
     probability = np.exp(-free_energies)
     Z = np.sum(probability, axis=0)
-    return probability/Z
+    return probability / Z
 
 
 def micro_pKas_to_equilibrium_graph(csvfile: str) -> nx.DiGraph:
-    """   
+    """
     Takes a microstate pairs csv file and returns directed Graph
 
     Parameters
@@ -128,7 +171,7 @@ def micro_pKas_to_equilibrium_graph(csvfile: str) -> nx.DiGraph:
 
     Returns
     -------
-    Directed graph of the micropKas   
+    Directed graph of the micropKas
 
     """
     mol_frame = pd.read_csv(csvfile)
@@ -151,7 +194,9 @@ def micro_pKas_to_equilibrium_graph(csvfile: str) -> nx.DiGraph:
     return graph
 
 
-def macro_pkas_to_species_concentration(pkas: np.ndarray, ph: float, total_concentration: float) -> np.ndarray:
+def macro_pkas_to_species_concentration(
+    pkas: np.ndarray, ph: float, total_concentration: float
+) -> np.ndarray:
     """
     Convert macroscopic pKas to concentrations using a system of equations.
 
@@ -160,7 +205,7 @@ def macro_pkas_to_species_concentration(pkas: np.ndarray, ph: float, total_conce
     pkas - 1D array of macroscopic pKa values
     ph - The pH value.
         Note: This function is not compatible with arrays of pH values
-    total_concentration - the total concentration of all species. 
+    total_concentration - the total concentration of all species.
         Set this to 1 for fractional concentrations.
 
     Returns
@@ -171,10 +216,10 @@ def macro_pkas_to_species_concentration(pkas: np.ndarray, ph: float, total_conce
     Notes
     -----
 
-    According to RI Allen et al J Pharm Biomed Anal 17 (1998) 699-712, the 
+    According to RI Allen et al J Pharm Biomed Anal 17 (1998) 699-712, the
     concentrations of the macroscates, C(n), where n is the index of species
-    can be calculated according to a system of equations from a series of m = n-1 
-    pKas, Kn, given initial concentration y. 
+    can be calculated according to a system of equations from a series of m = n-1
+    pKas, Kn, given initial concentration y.
 
     If we treat the Kn as known, the concentrations can be determined as follows.
 
@@ -184,7 +229,7 @@ def macro_pkas_to_species_concentration(pkas: np.ndarray, ph: float, total_conce
     |0|  | 0.   0.   Km  -H. |       |C(n)|
 
     Shorthand:
-    C = Y M 
+    C = Y M
 
     Rearranging gives
     C = M-1 Y
@@ -208,10 +253,10 @@ def macro_pkas_to_species_concentration(pkas: np.ndarray, ph: float, total_conce
     for row_num, ka in enumerate(kas):
         row = np.zeros(num_species)
         row[row_num] = ka
-        row[row_num+1] = -H
+        row[row_num + 1] = -H
         rows.append(row)
 
-    system_of_equations = np.matrix(rows)
+    system_of_equations = np.array(rows)
     # Need to transpose the matrix for the inversion to work correctly
     species = np.linalg.inv(system_of_equations) @ initial_concentrations
     species = np.asarray(species)
@@ -229,11 +274,10 @@ def populations_from_macro_pka(pkas: np.ndarray, phvalues: np.ndarray) -> np.nda
     ----------
     pkas - 1D array of macroscopic pKa values
     ph - The pH value.
-        Note: This function is not compatible with arrays of pH values    
 
     """
     # create array in memory
-    populations = np.empty([pkas.size+1, phvalues.size])
+    populations = np.empty([pkas.size + 1, phvalues.size])
 
     # Set concentration for each state for each pH
     for col, ph in enumerate(phvalues):
@@ -243,12 +287,19 @@ def populations_from_macro_pka(pkas: np.ndarray, phvalues: np.ndarray) -> np.nda
     return populations
 
 
-def free_energy_from_population(populations: np.ndarray) -> np.ndarray:
+def free_energy_from_population(
+    populations: np.ndarray, nan_r_tolerance=0.95
+) -> np.ndarray:
     """Calculate relative free energies from their populations.
 
     Parameters    
     ----------
     populations - 2D-array of populations with axes [state,pH]
+
+    nan_r_tolerance - If linear regression for missing values has absolute R value below this number, show warning.
+        Due to numeric instability, free energy curves start incorporating errors at small populations.
+        Small amounts of missing data are replaced with a linear regression.
+
 
     Returns
     -------
@@ -259,7 +310,53 @@ def free_energy_from_population(populations: np.ndarray) -> np.ndarray:
     The relative free energy is defined as:
     relative dG[1..n] = - ln (Pop[1..n]) - ln (Pop)[n]
     """
-    free_energies = - np.log(populations)
+    old_settings = np.geterr()
+    np.seterr(invalid="ignore", divide="ignore")
+
+    # Set to 0.0 value to invalidate numbers that are too small
+    # only for cases where 2/3 majority of curve is still good.
+    small_values = populations < sys.float_info.epsilon
+    if np.count_nonzero(small_values) < populations.shape[1] // 2:
+        populations = deepcopy(populations)
+        populations[small_values] = 0.0
+    free_energies = -np.log(populations)
+    np.seterr(**old_settings)
+
+    # Due to floating point precision limitations, small populations are troublesome
+    # However, free energy curves should be linear so we can rescue values by linear regression
+    if not np.all(np.isfinite(free_energies)):
+
+        # Normalize if possible by the first state without nans, to obtain mostly linear curves
+
+        for state in range(free_energies.shape[0]):
+            if np.all(np.isfinite(free_energies[state])):
+                free_energies -= free_energies[state]
+                break
+
+        x_val = np.arange(free_energies.shape[1])
+        for state in range(free_energies.shape[0]):
+            if not np.all(np.isfinite(free_energies[state])):
+                nans, index_helper = invalid_value_helper(free_energies[state])
+                num_nans = np.count_nonzero(nans)
+                if num_nans > populations.shape[1] // 2:
+                    warnings.warn(
+                        "More than 1/2 ({}) NaN free energies found ({}).".format(
+                            populations.shape[1] // 2, num_nans
+                        )
+                    )
+
+                slope, intercept, r_value, p_value, std_err = linregress(
+                    x_val[~nans], free_energies[state, ~nans]
+                )
+                if np.abs(r_value) < nan_r_tolerance:
+                    warnings.warn(
+                        "Absolute R-value (|{}|) < {}, free energy slope may not be linear.".format(
+                            r_value, nan_r_tolerance
+                        )
+                    )
+
+                for nan_index in index_helper(nans):
+                    free_energies[state][nan_index] = slope * nan_index + intercept
 
     return free_energies - free_energies[0]
 
@@ -267,16 +364,40 @@ def free_energy_from_population(populations: np.ndarray) -> np.ndarray:
 def powerset(iterable: Iterable[float]) -> Iterator[Tuple[float, ...]]:
     "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
     s = list(iterable)
-    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+    return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
 
-def dynamic_range_solve(x1: float,x2: float, lower:float, upper:float)-> Tuple[float, float]:
+
+def invalid_value_helper(y):
+    """Helper to handle indices and logical indices of NaNs and infinite values.
+
+    Input:
+        - y, 1d numpy array with possible NaNs
+    Output:
+        - nans, logical indices of NaNs
+        - index, a function, with signature indices= index(logical_indices),
+          to convert logical indices of NaNs to 'equivalent' indices
+    Example:
+        >>> # linear interpolation of NaNs
+        >>> nans, x= invalid_value_helper(y)
+        >>> y[nans]= np.interp(x(nans), x(~nans), y[~nans])
+
+    Original source:
+        https://stackoverflow.com/a/652069
+    """
+
+    return ~np.isfinite(y), lambda z: z.nonzero()[0]
+
+
+def dynamic_range_solve(
+    x1: float, x2: float, lower: float, upper: float
+) -> Tuple[float, float]:
     """Fill any missing values with the lower, or upper bound of a dynamic range, based on the position of the value to be compared against."""
-    if np.isnan(x1):        
+    if np.isnan(x1):
         if x2 >= 7.0:
             return upper, x2
         elif x2 < 7.0:
             return lower, x2
-    elif np.isnan(x2):        
+    elif np.isnan(x2):
         if x1 >= 7.0:
             return x1, upper
         elif x1 < 7.0:
@@ -284,26 +405,89 @@ def dynamic_range_solve(x1: float,x2: float, lower:float, upper:float)-> Tuple[f
     else:
         return x1, x2
 
-def fixed_cost_solve(x1: float,x2: float, cost:float=0.0)-> Tuple[float, float]:
+
+def fixed_cost_solve(x1: float, x2: float, cost: float = 10.0) -> Tuple[float, float]:
     """Fill any missing value with the other value, plus an offset"""
-    if np.isnan(x1):        
-        return x2+cost, x2        
-    elif np.isnan(x2):        
-        return x1,x1+cost
-    else: 
-        return x1,x2
+    if np.isnan(x1):
+        return x2 + cost, x2
+    elif np.isnan(x2):
+        return x1, x1 + cost
+    else:
+        return x1, x2
 
-def fixed_value_solve(x1: float, x2: float, value:float=0.0)-> Tuple[float, float]:
+
+def fixed_value_solve(x1: float, x2: float, value: float = 0.0) -> Tuple[float, float]:
     """Fill any missing value with a fixed value."""
-    if np.isnan(x1):        
-        return value, x2        
-    elif np.isnan(x2):        
+    if np.isnan(x1):
+        return value, x2
+    elif np.isnan(x2):
         return x1, value
-    else: 
-        return x1,x2
- 
+    else:
+        return x1, x2
 
-def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]) -> pd.DataFrame:
+
+def fit_titration_curve(
+    curve1, curve2, fitness_function, *fitness_args
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """Align two curves by integer values using fitness function.
+    Returns
+    -------
+    curve 1 (unmodified), curve 2 (aligned), fittness score
+
+    """
+    # Grab charge curves, and ensure lowest value is 0.
+    q1 = curve1 - int(round(min(curve1)))
+    q2 = curve2 - int(round(min(curve2)))
+    max1 = int(round(max(q1)))
+    max2 = int(round(max(q2)))
+
+    # Maximum range of the alignment is from -max, max
+    m = max([max1, max2])
+    offsets = (np.arange(-m, m + 1) * np.ones([q2.size, 2 * m + 1])).T
+    # charges in q2 + all possible offsets
+    q_array = (np.ones([2 * m + 1, q2.size]) * q2) + offsets
+    scores = np.apply_along_axis(fitness_function, 1, q_array, curve1, *fitness_args)
+    # Return the best solution
+    argmin = np.argmin(scores)
+    return curve1, q_array[argmin, :], scores[argmin]
+
+
+def fit_titration_curves_3d(curves1, curves2, fitness_function, *fitness_args):
+    """Vectorized version of fit_titration_curve,
+
+    Parameters
+    ----------
+    curves1 - [,pH]
+    curves2
+    fitness_function
+    fitness_args
+
+    Returns
+    -------
+
+    """
+    q1 = curves1 - np.round(np.min(curves1, axis=1))[:, np.newaxis]
+    q2 = curves2 - np.round(np.min(curves2, axis=1))[:, np.newaxis]
+    max1 = np.round(np.max(q1, axis=1)).astype(np.int)
+    max2 = np.round(np.max(q2, axis=1)).astype(np.int)
+    m = np.max([max1, max2])
+
+    curve1_multi = np.repeat(curves1[:, :, np.newaxis], 2 * m + 1, axis=2)
+
+    # Maximum range of the alignment is from -max, max
+    offsets = np.ones([*q2.shape, 2 * m + 1]) * np.arange(-m, m + 1)
+    q_array = (np.ones([*q2.shape, 2 * m + 1]) * q2[:, :, np.newaxis]) + offsets
+    scores = fitness_function(q_array, curve1_multi, *fitness_args)
+    argmin = np.argmin(scores, axis=1)
+    # return curve1, curve2
+    return curves1, q_array[np.arange(q_array.shape[0]), :, argmin], scores.min(axis=1)
+
+
+def hungarian_pka(
+    experimental_pkas: np.ndarray,
+    predicted_pkas: np.ndarray,
+    cost_function: Callable[[float, float], float],
+) -> pd.DataFrame:
     """Using the Hungarian algorithm (a.ka. linear sum assignment), return a mapping between experiment, and predicted pKas,
     and the error.    
    
@@ -318,30 +502,62 @@ def hungarian_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cos
     n_predicted = predicted_pkas["pKa"].values.size
     size = max([n_experimental, n_predicted])
     # not matched up has 0 cost
-    cost_matrix = np.zeros([size,size])
-    for i in range(size):                
-        for j in range(size):            
+    cost_matrix = np.zeros([size, size])
+    for i in range(size):
+        for j in range(size):
             if i < n_experimental and j < n_predicted:
                 experimental_pka = experimental_pkas["pKa"].values[i]
                 predicted_pka = predicted_pkas["pKa"].values[j]
-                cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)           
-    
+                cost_matrix[i, j] = cost_function(experimental_pka, predicted_pka)
+
     row_indices, col_indices = linear_sum_assignment(cost_matrix)
-        
+
     df = pd.DataFrame(columns=["Experimental", "Predicted", "Cost"])
     for i, row_id in enumerate(row_indices):
         col_id = col_indices[i]
         # Skip unmatched
         if row_id >= n_experimental:
-            df = df.append({"Experimental": np.nan, "Experimental SEM" : np.nan, "Predicted": predicted_pkas["pKa"].values[col_id], "Predicted SEM": predicted_pkas["SEM"].values[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)        
+            df = df.append(
+                {
+                    "Experimental": np.nan,
+                    "Experimental SEM": np.nan,
+                    "Predicted": predicted_pkas["pKa"].values[col_id],
+                    "Predicted SEM": predicted_pkas["SEM"].values[col_id],
+                    "Cost": cost_matrix[row_id, col_id],
+                },
+                ignore_index=True,
+            )
         elif col_id >= n_predicted:
-            df = df.append({"Experimental": experimental_pkas["pKa"].values[row_id], "Experimental SEM" : experimental_pkas["SEM"].values[row_id], "Predicted": np.nan, "Predicted SEM": np.nan, "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)         
+            df = df.append(
+                {
+                    "Experimental": experimental_pkas["pKa"].values[row_id],
+                    "Experimental SEM": experimental_pkas["SEM"].values[row_id],
+                    "Predicted": np.nan,
+                    "Predicted SEM": np.nan,
+                    "Cost": cost_matrix[row_id, col_id],
+                },
+                ignore_index=True,
+            )
         else:
-            df = df.append({"Experimental": experimental_pkas["pKa"].values[row_id], "Experimental SEM" : experimental_pkas["SEM"].values[row_id], "Predicted": predicted_pkas["pKa"].values[col_id], "Predicted SEM": predicted_pkas["SEM"].values[col_id], "Cost": cost_matrix[row_id, col_id]}, ignore_index=True)
+            df = df.append(
+                {
+                    "Experimental": experimental_pkas["pKa"].values[row_id],
+                    "Experimental SEM": experimental_pkas["SEM"].values[row_id],
+                    "Predicted": predicted_pkas["pKa"].values[col_id],
+                    "Predicted SEM": predicted_pkas["SEM"].values[col_id],
+                    "Cost": cost_matrix[row_id, col_id],
+                },
+                ignore_index=True,
+            )
 
     return df
 
-def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_function: Callable[[float,float], float]):
+
+def align_pka(
+    experimental_pkas: np.ndarray,
+    predicted_pkas: np.ndarray,
+    cost_function: Callable[[float, float], float],
+):
     """Align pKas sequentialy and find the alignment that minimizes the cost.
     
     Parameters
@@ -350,8 +566,8 @@ def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_fu
     predicted_pkas - 1D array of predicted pKa values
     cost_function - function to calculate the cost of any invidual mapping.    
     """
-    n_experimental = experimental_pkas["pKa"].values.size  
-    n_predicted = predicted_pkas["pKa"].values.size 
+    n_experimental = experimental_pkas["pKa"].values.size
+    n_predicted = predicted_pkas["pKa"].values.size
     # biggest size, and additional zero
     num_ka = max([n_experimental, n_predicted])
     exp = np.empty(num_ka)
@@ -364,7 +580,7 @@ def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_fu
     sem_exp[:] = np.nan
 
     experimental_pkas["pKa"].values.sort()
-    predicted_pkas["pKa"].values.sort()    
+    predicted_pkas["pKa"].values.sort()
     exp[:n_experimental] = experimental_pkas["pKa"].values
     pred[:n_predicted] = predicted_pkas["pKa"].values
 
@@ -379,11 +595,9 @@ def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_fu
         pred = np.roll(pred, 1)
         sem_pred = np.roll(sem_pred, 1)
         cost = []
-        for e1,p1 in np.array([deepcopy(exp), deepcopy(pred)]).T:
-            # if a pKa is dropped at the low end, match to 0
-            # If a pKa is dropped at the high end, match to 14            
-            e1,p1 = dynamic_range_solve(e1,p1, 0.0, 14.0)                            
-            cost.append(cost_function(e1,p1))
+        for e1, p1 in np.array([deepcopy(exp), deepcopy(pred)]).T:
+            e1, p1 = fixed_cost_solve(e1, p1, 14.00)
+            cost.append(cost_function(e1, p1))
         total_cost = np.sum(cost)
         if total_cost < min_cost:
             solution = deepcopy(pred)
@@ -391,9 +605,22 @@ def align_pka(experimental_pkas: np.ndarray, predicted_pkas: np.ndarray, cost_fu
             solution_cost = cost
             sol_sem = deepcopy(sem_pred)
 
-    return pd.DataFrame.from_dict({"Experimental":  exp, "Experimental SEM": sem_exp,  "Predicted":  solution, "Predicted SEM": sol_sem,  "Cost": solution_cost})
+    return pd.DataFrame.from_dict(
+        {
+            "Experimental": exp,
+            "Experimental SEM": sem_exp,
+            "Predicted": solution,
+            "Predicted SEM": sol_sem,
+            "Cost": solution_cost,
+        }
+    )
 
-def closest_pka(experimental_pkas:np.ndarray, predicted_pkas:np.ndarray, cost_function:Callable[[float,float], float])-> pd.DataFrame:
+
+def closest_pka(
+    experimental_pkas: np.ndarray,
+    predicted_pkas: np.ndarray,
+    cost_function: Callable[[float, float], float],
+) -> pd.DataFrame:
     """Find the closest match-ups between experiment and prediction.    
 
     Parameters
@@ -413,49 +640,87 @@ def closest_pka(experimental_pkas:np.ndarray, predicted_pkas:np.ndarray, cost_fu
     5. ) Any remaing pKa values are mapped to NaN
 
     """
-    
+
     experiment_copy = deepcopy(experimental_pkas["pKa"].values)
     predicted_copy = deepcopy(predicted_pkas["pKa"].values)
     sem_experiment_copy = deepcopy(experimental_pkas["SEM"].values)
-    sem_predicted_copy =  deepcopy(predicted_pkas["SEM"].values)
-    
+    sem_predicted_copy = deepcopy(predicted_pkas["SEM"].values)
+
     n_experimental = experiment_copy.size
     n_predicted = predicted_copy.size
-    cost_matrix = np.empty([n_experimental,n_predicted])
-    for i in range(n_experimental):        
+    cost_matrix = np.empty([n_experimental, n_predicted])
+    for i in range(n_experimental):
         experimental_pka = experiment_copy[i]
         for j in range(n_predicted):
             predicted_pka = predicted_copy[j]
-            cost_matrix[i,j] = cost_function(experimental_pka, predicted_pka)
-    
-    df = pd.DataFrame(columns=["Experimental", "Experimental SEM", "Predicted", "Predicted SEM", "Cost"])
-    
-    # Continue 
-    while cost_matrix.size > 0:        
-        # Find the best match        
+            cost_matrix[i, j] = cost_function(experimental_pka, predicted_pka)
+
+    df = pd.DataFrame(
+        columns=[
+            "Experimental",
+            "Experimental SEM",
+            "Predicted",
+            "Predicted SEM",
+            "Cost",
+        ]
+    )
+
+    # Continue
+    while cost_matrix.size > 0:
+        # Find the best match
         match = np.nanargmin(cost_matrix)
         # divide gives row, mod gives col
         row, col = divmod(match, cost_matrix.shape[1])
         experimental_pka = experiment_copy[row]
         predicted_pka = predicted_copy[col]
         experimental_sem = sem_experiment_copy[row]
-        predicted_sem = sem_predicted_copy[col]        
-        cost = cost_matrix[row,col]
-        df = df.append({"Experimental": experimental_pka, "Experimental SEM": experimental_sem, "Predicted": predicted_pka, "Predicted SEM": predicted_sem, "Cost": cost}, ignore_index=True)
+        predicted_sem = sem_predicted_copy[col]
+        cost = cost_matrix[row, col]
+        df = df.append(
+            {
+                "Experimental": experimental_pka,
+                "Experimental SEM": experimental_sem,
+                "Predicted": predicted_pka,
+                "Predicted SEM": predicted_sem,
+                "Cost": cost,
+            },
+            ignore_index=True,
+        )
         experiment_copy = np.delete(experiment_copy, row)
         predicted_copy = np.delete(predicted_copy, col)
         sem_experiment_copy = np.delete(sem_experiment_copy, row)
         sem_predicted_copy = np.delete(sem_predicted_copy, col)
-        cost_matrix = np.delete(cost_matrix,row,0)
-        cost_matrix = np.delete(cost_matrix,col,1)        
-        
-    
+        cost_matrix = np.delete(cost_matrix, row, 0)
+        cost_matrix = np.delete(cost_matrix, col, 1)
+
     # return any left over as nan match and calculate cost based on distance to 0.0, or 14.0
     for leftover_pka, leftover_sem in zip(experiment_copy, sem_experiment_copy):
-        df = df.append({"Experimental": leftover_pka, "Experimental SEM": leftover_sem, "Predicted": np.nan, "Predicted SEM": np.nan, "Cost": cost_function(*dynamic_range_solve(leftover_pka, np.nan,0.0, 14.0))}, ignore_index=True)
+        df = df.append(
+            {
+                "Experimental": leftover_pka,
+                "Experimental SEM": leftover_sem,
+                "Predicted": np.nan,
+                "Predicted SEM": np.nan,
+                "Cost": cost_function(
+                    *dynamic_range_solve(leftover_pka, np.nan, 0.0, 14.0)
+                ),
+            },
+            ignore_index=True,
+        )
     for leftover_pka, leftover_sem in zip(predicted_copy, sem_predicted_copy):
-        df = df.append({"Experimental": np.nan, "Experimental SEM": np.nan, "Predicted": leftover_pka, "Predicted SEM": leftover_sem, "Cost": cost_function(*dynamic_range_solve(leftover_pka, np.nan,0.0, 14.0))}, ignore_index=True)
-        
+        df = df.append(
+            {
+                "Experimental": np.nan,
+                "Experimental SEM": np.nan,
+                "Predicted": leftover_pka,
+                "Predicted SEM": leftover_sem,
+                "Cost": cost_function(
+                    *dynamic_range_solve(leftover_pka, np.nan, 0.0, 14.0)
+                ),
+            },
+            ignore_index=True,
+        )
+
     return df
 
 
@@ -486,11 +751,45 @@ def add_reverse_equilibrium_arrows(graph: nx.DiGraph):
         # Retrieve the edge properties
         props = deepcopy(graph.edges[from_state, to_state])
         # invert the Ka
-        props['pKa'] = - props['pKa']
+        props["pKa"] = -props["pKa"]
+
         # Add edge in reverse order
         graph_copy.add_edge(to_state, from_state, **props)
 
     return graph_copy
+
+
+def add_Ka_equil_graph(graph: nx.DiGraph, inplace=True):
+    """Transform pKa into Ka on graph.
+
+
+    Parameters
+    ----------
+    graph - a pKa equilibrium represented as a networkx directional graph (DiGraph)
+    inplace - modifies graph in place
+
+    Notes
+    -----
+    Does not modify the graph in place.
+
+    Returns
+    -------
+    Equilibrium graph with Ka values
+    """
+    if not inplace:
+        graph = deepcopy(graph)
+
+    for from_state, to_state in graph.edges:
+        # Retrieve the edge properties
+
+        props = graph.edges[from_state, to_state]
+        # invert the Ka
+        props["Ka"] = math.pow(10, -props["pKa"])
+        props["Kainv"] = 1.0 / math.pow(10, -props["pKa"])
+        props["pKa7"] = abs(props["pKa"] - 7.0)  # closest to 7
+
+    return graph
+
 
 class TitrationCurve:
     """The representation of a titration curve of multiple protonation states over a range of pH values.
@@ -513,17 +812,30 @@ class TitrationCurve:
         self.ph_values = None
         self.state_ids = None
         self.mean_charge = None
-        self.charges = None        
+        self.charges = None
 
-    def _update_charges_from_file(self,charge_file, charge_header=0):
+    def _update_charges_from_file(self, charge_file, charge_header=0):
         """"""
         # Charge data from standard file
         charges = pd.read_csv(charge_file, header=charge_header)
-        for idx,state in enumerate(self.state_ids):
-            charge = charges[charges['Microstate ID'] == state]['Charge'].iloc[0]            
+        for idx, state in enumerate(self.state_ids):
+            charge = charges[charges["Microstate ID"] == state]["Charge"].iloc[0]
             self.charges[idx] = charge
-        
+
         self.mean_charge = self.charges @ self.populations
+        return
+
+    def _update_charges_from_dict(self, charge_dict: Dict[str, int]):
+        """Update charge data from a dict of state: charge."""
+        for idx, state in enumerate(self.state_ids):
+            self.charges[idx] = charge_dict[state]
+        self.mean_charge = self.charges @ self.populations
+
+    def _override_charges(self, charges: np.ndarray):
+        """Set the charges from an array, and update the mean charge"""
+        self.charges = charges
+        self.mean_charge = self.charges @ self.populations
+
         return
 
     def _set_free_energy_reference_state(self, state_index: int):
@@ -532,16 +844,19 @@ class TitrationCurve:
 
     def _pick_zero_charge_ref_state(self, fallback=True):
         """Find the lowest free energy state with charge equals 0, and set that as reference."""
-        zeros = np.atleast_1d(np.squeeze(np.where(self.charges==0)))
-        
+        zeros = np.atleast_1d(np.squeeze(np.where(self.charges == 0)))
+
         if zeros.size < 1:
             return
-        min_free = 1.e16 # large number
+        min_free = 1.0e16  # large number
         final_zero = None
         updated = False
         for zero in zeros:
             # If state isn't present/populated, all around cant use it as a reference
-            if np.isnan(self.free_energies[zero]).any() or np.isinf(self.free_energies[zero]).any():
+            if (
+                np.isnan(self.free_energies[zero]).any()
+                or np.isinf(self.free_energies[zero]).any()
+            ):
                 continue
             # Just check the first free energy for each state, since supposedly all parallel
             free_ene = deepcopy(self.free_energies[zero, 0])
@@ -554,13 +869,19 @@ class TitrationCurve:
             self._set_free_energy_reference_state(final_zero)
         # attempt using a charged state as reference.
         elif fallback:
-            warnings.warn("No contiguous neutral state present. Using a charged state as reference.", RuntimeWarning)
-            min_free = 1.e16  # large number
+            warnings.warn(
+                "No contiguous neutral state present. Using a charged state as reference.",
+                RuntimeWarning,
+            )
+            min_free = 1.0e16  # large number
             final_zero = None
             updated = False
             for idx in range(self.free_energies.shape[0]):
                 # If state isn't present/populated, all around cant use it as a reference
-                if np.isnan(self.free_energies[idx]).any() or np.isinf(self.free_energies[idx]).any():
+                if (
+                    np.isnan(self.free_energies[idx]).any()
+                    or np.isinf(self.free_energies[idx]).any()
+                ):
                     continue
                 # Just check the first free energy for each state, since supposedly all parallel
                 free_ene = deepcopy(self.free_energies[idx, 0])
@@ -573,7 +894,9 @@ class TitrationCurve:
             else:
                 warnings.warn("Could not find any contiguous state.", RuntimeWarning)
         else:
-            warnings.warn("Could not find an appropriate neutral reference state.", RuntimeWarning)
+            warnings.warn(
+                "Could not find an appropriate neutral reference state.", RuntimeWarning
+            )
 
     @classmethod
     def from_micro_pkas(cls, micropkas: np.ndarray, ph_values: np.ndarray):
@@ -597,15 +920,14 @@ class TitrationCurve:
         for included_pks in powerset(micropkas):
             bound_protons = len(included_pks)
             # Free energy according to Ullmann (2003)
-            energies.append(free_energy_from_pka(
-                bound_protons, np.sum(included_pks), ph_values))
+            energies.append(
+                free_energy_from_pka(bound_protons, np.sum(included_pks), ph_values)
+            )
             # Identifier for each state
-            state_ids.append(
-                "+".join(["{:.2f}".format(pk) for pk in included_pks]))
+            state_ids.append("+".join(["{:.2f}".format(pk) for pk in included_pks]))
             nbound.append(bound_protons)
         instance.free_energies = np.asarray(energies)
-        instance.populations = populations_from_free_energies(
-            instance.free_energies)
+        instance.populations = populations_from_free_energies(instance.free_energies)
         instance.ph_values = ph_values
         instance.state_ids = state_ids
         instance.charges = np.asarray(nbound)
@@ -632,47 +954,52 @@ class TitrationCurve:
 
         Can be generated using `micro_pKas_to_equilibrium_graph`
         """
-        # List of nodes (states). Order least->most protonated
-        node_topology = list(nx.algorithms.dag.topological_sort(graph))
-        augmented_graph = add_reverse_equilibrium_arrows(graph)
-
-        instance = cls()
-        energies: List[np.ndarray] = list()
-        nbound: List[int] = [0]
-
 
         # First state has least protons bound, set to 0 to be reference to other states
-        reference = node_topology[0]
+        reference = list(nx.algorithms.dag.dag_longest_path(graph))[0]
+        all_nodes = list(deepcopy(graph.nodes))
+        all_nodes.remove(reference)
+        all_nodes.insert(0, reference)
+        augmented_graph = add_reverse_equilibrium_arrows(graph)
+        augmented_graph = add_Ka_equil_graph(augmented_graph)
+
+        instance = cls()
+        instance.augmented_graph = augmented_graph
+        energies: List[np.ndarray] = list()
+
+        nbound: List[int] = [0]
+
         energies.append(free_energy_from_pka(0, 0.0, ph_values))
 
-
         # Every node is a state
-        for s, state in enumerate(node_topology[1:], start=1):
+        for s, state in enumerate(all_nodes[1:], start=1):
             # Least number of equilibria to pass through to reach a state
-            path = nx.shortest_path(augmented_graph, reference, node_topology[s])
+            # If there are more than one path, the shortest one is the one that uses pKas closer to 7
+            # Which should be the most relevant range, and likely the applicable range of most techniques
+            path = nx.shortest_path(
+                augmented_graph, reference, all_nodes[s], weight="pKa7"
+            )
             # The number of protons is equal to the number of equilibria traversed
-            bound_protons = len(path)-1
+            bound_protons = len(path) - 1
             sumpKa = 0
             # Add pKa along edges of the path
-            for edge in range(bound_protons):                
-                sumpKa += augmented_graph[path[edge]][path[edge+1]]['pKa']
+            for edge in range(bound_protons):
+                sumpKa += augmented_graph[path[edge]][path[edge + 1]]["pKa"]
                 # For reverse paths, deduct one proton
-                if not graph.has_edge(path[edge],path[edge+1]):
+                if not graph.has_edge(path[edge], path[edge + 1]):
                     bound_protons -= 1
 
             # Free energy calculated according to Ullmann (2003).
-            energies.append(free_energy_from_pka(
-                bound_protons, sumpKa, ph_values))
+            energies.append(free_energy_from_pka(bound_protons, sumpKa, ph_values))
             nbound.append(bound_protons)
 
         instance.free_energies = np.asarray(energies)
-        instance.populations = populations_from_free_energies(
-            instance.free_energies)
+        instance.populations = populations_from_free_energies(instance.free_energies)
         instance.ph_values = ph_values
-        instance.state_ids = node_topology
+        instance.state_ids = all_nodes
         instance.charges = np.asarray(nbound)
         instance.mean_charge = instance.charges @ instance.populations
-         # Set lowest value to 0
+        # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
 
         return instance
@@ -689,9 +1016,11 @@ class TitrationCurve:
         """
         macropkas.sort()
         instance = cls()
+        instance.pkas = macropkas
+        instance.sems = np.zeros_like(macropkas)
         instance.populations = populations_from_macro_pka(macropkas, ph_values)
-        instance.free_energies = free_energy_from_population(
-            instance.populations)
+        instance.free_energies = free_energy_from_population(instance.populations)
+
         instance.ph_values = ph_values
         state_ids: List[str] = ["Deprotonated"]
         nbound: List[int] = [0]
@@ -701,14 +1030,19 @@ class TitrationCurve:
         instance.state_ids = state_ids
         instance.charges = np.asarray(nbound)
         instance.mean_charge = instance.charges @ instance.populations
-         # Set lowest value to 0
+        # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
-        
 
         return instance
 
     @classmethod
-    def from_populations(cls, populations: np.ndarray, ph_values: np.ndarray, nbound: np.ndarray, state_ids: Optional[List[str]]=None):
+    def from_populations(
+        cls,
+        populations: np.ndarray,
+        ph_values: np.ndarray,
+        nbound: np.ndarray,
+        state_ids: Optional[List[str]] = None,
+    ):
         """Instantiate a TitrationCurve from individual state populations.
 
         Parameters
@@ -721,19 +1055,21 @@ class TitrationCurve:
         """
         if not populations.shape[1] == ph_values.size:
             raise ValueError(
-                "The second dim of populations and the size of ph_values need to match.")
+                "The second dim of populations and the size of ph_values need to match."
+            )
 
         if state_ids is not None:
             num_ids = len(state_ids)
             num_states = populations.shape[0]
             if num_ids != num_states:
                 raise ValueError(
-                    f"Number of state identifiers ({num_ids}) and number of states ({num_states}) don't match.")
+                    f"Number of state identifiers ({num_ids}) and number of states ({num_states}) don't match."
+                )
 
         instance = cls()
         instance.state_ids = state_ids
         instance.populations = populations
-        instance.free_energies = - np.log(populations) # unnormalized
+        instance.free_energies = -np.log(populations)  # unnormalized
         instance.ph_values = ph_values
         instance.charges = np.asarray(nbound)
         instance.mean_charge = instance.charges @ instance.populations
@@ -742,7 +1078,12 @@ class TitrationCurve:
 
         return instance
 
-    def align_mean_charge(self, other_curve, distance_function: Callable[[np.ndarray, np.ndarray, Optional[Any]],float], *args) -> None:
+    def align_mean_charge(
+        self,
+        other_curve,
+        distance_function: Callable[[np.ndarray, np.ndarray, Optional[Any]], float],
+        *args,
+    ) -> None:
         """Find the offset between the mean charge of this curve and the other that produces the closest match and shifts this mean charge curve by that offset.
         
         Parameters
@@ -762,26 +1103,26 @@ class TitrationCurve:
 
         # Grab charge curves, and ensure lowest value is 0.
         q1 = deepcopy(other_curve.mean_charge)
-        q1 -= int(round(min(q1)))    
+        q1 -= int(round(min(q1)))
         q2 = deepcopy(self.mean_charge)
-        q2 -=int(round(min(q2)))
-        
+        q2 -= int(round(min(q2)))
+
         max1 = int(round(max(q1)))
         max2 = int(round(max(q2)))
 
         # Maximum range of the alignment is from -max, max
-        m = max([max1,max2])
-        distance = 1.e16
+        m = max([max1, max2])
+        distance = 1.0e16
         aligned_q2 = deepcopy(q2)
         offset = 0
-        for i in range(-m,m+1):
+        for i in range(-m, m + 1):
             new_q2 = q2 + i
-            new_distance = distance_function(other_curve.mean_charge, new_q2, *args)            
+            new_distance = distance_function(other_curve.mean_charge, new_q2, *args)
             if new_distance < distance:
                 distance = new_distance
                 aligned_q2 = new_q2
                 offset = i
-        
+
         self.mean_charge = aligned_q2
 
     def plot(self, category_name: str) -> hv.Layout:
@@ -792,35 +1133,37 @@ class TitrationCurve:
         category 
         """
         category_data: Optional[np.ndarray] = None
-        if category_name == 'population':
+        if category_name == "population":
             category_data = self.populations
-        elif category_name == 'free_energy':
+        elif category_name == "free_energy":
             category_data = self.free_energies
-        elif category_name == 'charge':
+        elif category_name == "charge":
             category_data = self.mean_charge
         else:
             raise ValueError(
-                "Pick population or free_energy, or charge as category names.")
+                "Pick population or free_energy, or charge as category names."
+            )
 
         if category_name in ["population", "free_energy"]:
             data_series = dict(pH=self.ph_values)
             state_vars = []
             for s, state in enumerate(category_data):
                 if self.state_ids is None:
-                    state_var = "{}".format(s+1)
+                    state_var = "{}".format(s + 1)
                 else:
                     state_var = self.state_ids[s]
                 data_series[state_var] = state
                 state_vars.append(state_var)
 
             df = pd.DataFrame.from_dict(data_series)
-            df_cat = df.melt(id_vars=["pH"], value_vars=state_vars,
-                            var_name="State", value_name=category_name)
+            df_cat = df.melt(
+                id_vars=["pH"],
+                value_vars=state_vars,
+                var_name="State",
+                value_name=category_name,
+            )
             ds_cat = hv.Dataset(df_cat, vdims=category_name)
-            return ds_cat.to(hv.Curve, 'pH', groupby='State').overlay()
+            return ds_cat.to(hv.Curve, "pH", groupby="State").overlay()
         elif category_name in ["charge"]:
             xy = np.asarray([self.ph_values, self.mean_charge]).T
             return hv.Curve(xy, "pH", "Mean molecular charge")
-
-
-
