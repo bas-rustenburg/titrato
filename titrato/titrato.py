@@ -802,6 +802,8 @@ class TitrationCurve:
     state_ids - 1D array of identifiers for each state
     mean_charge - 2D array indexed by [state, pH] of the mean molecular charge at each pH value (relative to state 0)
     charge - 1D array of the charge assigned to each state
+    graph - nx.DiGraph for micropKa derived titration curves with the one-directional network of titration states.
+    augumented_graph - nx.DiGraph for micropKa derived titration curves with bidirectional network of titration states.
     """
 
     def __init__(self):
@@ -813,6 +815,9 @@ class TitrationCurve:
         self.state_ids = None
         self.mean_charge = None
         self.charges = None
+        self.pka_paths = None
+        self.augmented_graph = None
+        self.graph = None
 
     def _update_charges_from_file(self, charge_file, charge_header=0):
         """"""
@@ -962,7 +967,7 @@ class TitrationCurve:
         all_nodes.insert(0, reference)
         augmented_graph = add_reverse_equilibrium_arrows(graph)
         augmented_graph = add_Ka_equil_graph(augmented_graph)
-
+        pka_paths: List[str] = ['']
         instance = cls()
         instance.augmented_graph = augmented_graph
         energies: List[np.ndarray] = list()
@@ -992,6 +997,7 @@ class TitrationCurve:
             # Free energy calculated according to Ullmann (2003).
             energies.append(free_energy_from_pka(bound_protons, sumpKa, ph_values))
             nbound.append(bound_protons)
+            pka_paths.append(path)
 
         instance.free_energies = np.asarray(energies)
         instance.populations = populations_from_free_energies(instance.free_energies)
@@ -1001,6 +1007,7 @@ class TitrationCurve:
         instance.mean_charge = instance.charges @ instance.populations
         # Set lowest value to 0
         instance.mean_charge -= int(round(min(instance.mean_charge)))
+        instance.pka_paths = pka_paths
 
         return instance
 

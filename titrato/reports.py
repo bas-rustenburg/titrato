@@ -33,6 +33,7 @@ from .sampl import (
     bootstrap_rmse_r,
     bootstrap_pKa_dataframe,
     HaspKaType,
+    TypeIPrediction,
 )
 from .stats import (
     area_between_curves,
@@ -45,6 +46,9 @@ from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
 import logging
 from typing import List
 from uncertainties import ufloat
+import networkx as nx
+from networkx.drawing.nx_pydot import pydot_layout
+from collections import deque
 
 log = logging.getLogger()
 
@@ -187,14 +191,14 @@ class SAMPL6ReportGenerator:
         "dpi": 150,
         "figsize": (2.0, 2.0),  # 3 figures fitting between 3 cm margins on letter paper
         "line_styles": ["-", "--", "-.", ":"],
-        "line_widths": [0.75, 1.25,1.25, 1.25],
+        "line_widths": [0.75, 1.25, 1.25, 1.25],
         "colors_per_charge": charge_colors,
         # Use consistent colors for each method
         "extra_colors": sns.color_palette("dark"),
     }
 
     # Default number of bootstrap samples used to estimate titration curve confidence intervals
-    num_bootstrap_curves = 25
+    num_bootstrap_curves = 10000
 
     def __init__(
         self,
@@ -259,12 +263,16 @@ class SAMPL6ReportGenerator:
 
         # self._plot_virtual_titration_overview()
         self._plot_charge_legend()
+        # overview plot
+        self._plot_virtual_titration_overview()
+
         # Experiment gets its own plots
 
         # Virtual titration plot
         figtype = "virtual-titration"
         newfig = self.plot_virtual_titration(self._exp_provider)
         self._figures["Experiment"][figtype] = newfig
+
         # Free enery values
         figtype = "free-energy"
         newfig = self.plot_predicted_free_energy(self._exp_provider)
@@ -303,7 +311,7 @@ class SAMPL6ReportGenerator:
         # Overview charge titration
         titration_fig_ax = self._newfig()
 
-        for idx, pred in enumerate(self._prediction_providers, start=1):
+        for idx, pred in enumerate(self._prediction_providers, start=0):
             desc = pred.method_desc
             if pred.can_bootstrap:
                 exp_data, exp_curves, exp_bootstrap_data = (
@@ -350,7 +358,7 @@ class SAMPL6ReportGenerator:
         # labels = [item.get_text() for item in ax.get_yticklabels()]
         # empty_string_labels = [""] * len(labels)
         # ax.set_yticklabels(empty_string_labels)
-        ax.set_ylabel("Mean charge")
+        ax.set_ylabel(r"$Q_\mathsf{avg}$")
         ax.set_xlabel("pH")
         # x-tick every 2 pH units
         ax.set_xticks(np.arange(2.0, 14.0, 2.0))
@@ -577,7 +585,7 @@ class SAMPL6ReportGenerator:
         labels = [item.get_text() for item in ax.get_yticklabels()]
         # empty_string_labels = [""] * len(labels)
         # ax.set_yticklabels(empty_string_labels)
-        ax.set_ylabel(r"$\langle q_\mathsf{total} \rangle$")
+        ax.set_ylabel(r"$Q_\mathsf{avg}$")
         ax.set_xlabel("pH")
         # x-tick every 2 pH units
         ax.set_xticks(np.arange(2.0, 14.0, 2.0))
@@ -606,7 +614,6 @@ class SAMPL6ReportGenerator:
                 pred_data.ph_values,
                 pred_data.free_energies[i],
                 ls=self._figprops["line_styles"][ls],
-                
                 color=color,
                 label="n={}".format(charge),
                 zorder=zorder,
@@ -938,8 +945,9 @@ class FullpKaComparison:
 
         """Compile a full report of pKa mapping analysis across all of the SAMPL6 pKa molecules."""
 
-        if "exp" != exp_provider.data_type:
-            raise TypeError("Need an experimental provider as data type")
+        # TODO this is commented out for debugging, please put check back in in final version.
+        # if "exp" != exp_provider.data_type:
+        #    raise TypeError("Need an experimental provider as data type")
 
         self._exp_provider = exp_provider
         self._providers = data_providers
@@ -985,11 +993,7 @@ class FullpKaComparison:
         return pd.DataFrame({"pKa": titrationcurve.pkas, "SEM": titrationcurve.sems})
 
     def _perform_pka_maps(
-        self,
-        provider1: SAMPL6DataProvider,
-        provider2: SAMPL6DataProvider,
-        max_pka=14.0,
-        min_pka=0.0,
+        self, provider1: SAMPL6DataProvider, provider2: SAMPL6DataProvider
     ):
         full_df = pd.DataFrame()
         for mol in tqdm(
@@ -1540,7 +1544,7 @@ class TitrationComparison:
                 # labels = [item.get_text() for item in ax.get_yticklabels()]
                 # empty_string_labels = [""] * len(labels)
                 # ax.set_yticklabels(empty_string_labels)
-                sepax.set_ylabel(r"$\langle q_\mathsf{total} \rangle$")
+                sepax.set_ylabel(r"$Q_\mathsf{avg}$")
                 sepax.set_xlabel("pH")
                 # x-tick every 2 pH units
                 sepax.set_xticks(np.arange(2.0, 14.0, 2.0))
@@ -1557,7 +1561,7 @@ class TitrationComparison:
             # labels = [item.get_text() for item in ax.get_yticklabels()]
             # empty_string_labels = [""] * len(labels)
             # ax.set_yticklabels(empty_string_labels)
-            fullax.set_ylabel(r"$\langle q_\mathsf{total} \rangle$")
+            fullax.set_ylabel(r"$Q_\mathsf{avg}$")
             fullax.set_xlabel("pH")
             # x-tick every 2 pH units
             fullax.set_xticks(np.arange(2.0, 14.0, 2.0))
@@ -1703,3 +1707,105 @@ class LatexTable(TexBlock):
         else:
             self._variables["sideways"] = ""
         return
+
+
+def plot_micropka_network(
+    titrationcurve: TypeIPrediction
+) -> Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
+    """Plot the network of microstates connected by pKa values."""
+    if not isinstance(titrationcurve, TypeIPrediction):
+        raise TypeError(
+            "This function only implements handling of TypeIPrediction objects."
+        )
+
+    charges = dict(zip(titrationcurve.state_ids, titrationcurve.charges))
+
+    node_colors = []
+    for node in titrationcurve.augmented_graph.nodes:
+        node_colors.append(charge_colors[charges[node]])
+
+    edge_labels = dict()
+    for edge in titrationcurve.augmented_graph.edges:
+        # multiply by -1 to make arrow direction match pKa direction
+        edge_labels[(edge[0], edge[1])] = "{:.2f}".format(
+            -1 * titrationcurve.augmented_graph.edges[edge[0], edge[1]]["pKa"]
+        )
+
+    fig = plt.figure(figsize=(9,13), dpi=75)
+    pos = pydot_layout(titrationcurve.graph, prog="dot")
+    nx.draw_networkx_nodes(
+        titrationcurve.augmented_graph,
+        pos,
+        node_color=node_colors,
+        alpha=0.85,
+        node_size=6000,
+        node_shape="o",
+    )
+    nx.draw_networkx_labels(
+        titrationcurve.augmented_graph, pos, node_color=node_colors, alpha=1
+    )
+    nx.draw_networkx_edge_labels(
+        titrationcurve.augmented_graph,
+        pos,
+        label_pos=0.65,
+        edge_labels=edge_labels,
+        alpha=0.75,
+    )
+    nx.draw_networkx_edges(
+        titrationcurve.augmented_graph,
+        pos,
+        edge_labels=edge_labels,
+        alpha=0.75,
+        node_size=6000
+    )
+
+    plt.tight_layout()
+
+    sns.palplot(charge_colors.values())
+    ax = plt.gca()
+    xticks = ax.get_xticks()
+    xticks = [x + 0.5 for x in xticks]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(["{:+d}".format(l) for l in charge_colors.keys()])
+    for tick in ax.xaxis.get_major_ticks():
+        tick.label.set_fontsize(16)
+
+    plt.tight_layout()
+    return (fig, ax)
+
+
+def tabulate_cycles(titrationcurve: TypeIPrediction, length: int = 4) -> str:
+    """Returns a string with table of all cycles of specified length (default: 4).
+
+        Warning
+        -------
+        This example implementation uses networkx.simple_cycles. 
+        It is not very optimized, and involves making the list of all cycles and 
+        then picking out the ones of the correct length. 
+        This will be very slow for larger networks.
+
+    """
+    # # Find cycles of a specific length
+    if not isinstance(titrationcurve, TypeIPrediction):
+        raise TypeError(
+            "This function only implements handling of TypeIPrediction objects."
+        )
+
+    markdown: str = ""
+    cycles: List[Tuple[List[str], float]] = []
+
+    for cycle in tqdm(nx.simple_cycles(titrationcurve.augmented_graph), desc="cycles"):
+        if len(cycle) == length:
+            rotated = deque(cycle)
+            rotated.rotate(1)
+            tot = 0.0
+            for edge in zip(cycle, rotated):
+                tot += titrationcurve.augmented_graph.edges[edge]["pKa"]
+            cycles.append((cycle, tot))
+
+    markdown += "cycle | sum pKa \n -----|----- \n "
+
+    for (cycle, tot) in cycles:
+        markdown += f" {cycle} | {tot:.3f} \n"
+
+    return markdown

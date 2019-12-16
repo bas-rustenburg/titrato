@@ -11,10 +11,13 @@ from .stats import (
 )
 from scipy.stats import pearsonr
 from networkx import DiGraph
+import networkx as nx
 import warnings
 import os
 import logging
-
+from itertools import product
+from copy import deepcopy
+from uncertainties import ufloat
 from typing import List, Tuple, Dict, Callable, Union, Optional, Any
 
 sampl6_charges_file = os.path.join(data_dir, "SAMPL6_microstate_charges.csv")
@@ -42,7 +45,7 @@ def get_typei_pka_data(
 
     Returns
     -------
-    graph of states connected by pKa, dataframe of all pKa values.    
+    dataframe of all pKa values.    
     """
     df = pd.read_csv(datafile, header=header)
     # Override column names
@@ -91,6 +94,87 @@ def get_typeii_logp_data(
     return df[df["Molecule"] == molecule_name]
 
 
+def calculate_additional_micropKa_edges(typei_df: pd.DataFrame, micropka_graph: DiGraph) -> pd.DataFrame:
+    """
+    Add missing micropKa values between microstates with charge difference of one.
+    
+    Since most prediction methods do not return the pKa between two states that differ by multiple protons,
+    not all pKa values that are adjacent in the graph of states are calculated. 
+    
+    This method adds missing edges based on paths across the existing ones.
+    
+    Parameters
+    ----------
+    typei_df - a typeI data containing dataframe
+    micropka_graph - graph of the pKa values connected.
+
+    Returns
+    -------
+    Copy of the original dataframe, with new edges added (indexes are reset).    
+    """
+    df_copy = deepcopy(typei_df)
+    charges = pd.read_csv(sampl6_charges_file)
+    charge_dict = dict(zip(charges["Microstate ID"], charges["Charge"]))
+
+    molecule = df_copy.iloc[0]["Molecule"]
+    g = deepcopy(micropka_graph)
+
+    # add charge information for each node
+    for n in g.nodes:
+        q = charge_dict[n]
+        g.nodes[n]["charge"] = q
+
+    # Graph with reverse edges and inverted pKa, for finding paths and adding/subtracting pKa
+    g_augmented = deepcopy(g)
+    for (n1, n2) in g.edges:
+        pka = g[n1][n2]["pKa"]
+        sem = g[n1][n2]["SEM"]
+        g_augmented.add_edge(n2, n1, pKa=-pka, SEM=sem)
+
+    # Check every combination of nodes
+    for i, j in product(g.nodes, g.nodes):
+        q_i = g.nodes[i]["charge"]
+        q_j = g.nodes[j]["charge"]
+        # if i is singly protonated above j, begin procedure to add edge
+
+        if q_i - q_j == 1:
+            path = nx.shortest_path(g_augmented, i, j)
+            # No need to add edge of path is direct (which means only two nodes/one edge)
+            if len(path) > 2:
+                try:
+                    # If edge already exists, dont update it.
+                    g[j][i]
+                    continue
+                    # If edge does not exist, a keyerror is raised, so it is added here
+                except KeyError:
+                    # add all pKa values along path with uncertainty, as ufloat class which propagates uncertainty.
+                    pKa = sum(
+                        [
+                            ufloat(
+                                g_augmented[edge[0]][edge[1]]["pKa"],
+                                g_augmented[edge[0]][edge[1]]["SEM"],
+                            )
+                            for edge in zip(path[0:-1], path[1:])
+                        ]
+                    )
+                    # in the convention used for calculations, edge direction defined from deprot -> prot
+                    g.add_edge(j, i, pKa=pKa.nominal_value, SEM=pKa.s)
+                    logging.debug("Adding new micro pKa %s, %s, with pKa %u", i, j, pKa)
+                    # update the dataframe
+                    df_copy = df_copy.append(
+                        {
+                            "Protonated": i,
+                            "Deprotonated": j,
+                            "pKa": pKa.nominal_value,
+                            "SEM": pKa.s,
+                            "Molecule": molecule,
+                        },
+                        ignore_index=True,
+                    )
+
+    return df_copy, g
+
+
 def get_typeiii_pka_data(molecule_name: str, datafile: str, header: Optional[int] = 0):
     """Retrieve type III macroscopic pKa data for a single molecule from the data file
     
@@ -122,7 +206,7 @@ def species_by_charge(state_ids: List[str], charges: List[int]) -> Dict[int, Lis
     Dict with charge as keys, and lists that contain the names of microstates with that charge.
     """
     charge_dict = dict(zip(state_ids, charges))
-    species_dict = dict()
+    species_dict: Dict[int, List[str]] = dict()
 
     # Duplicates don't matter
     for value in charge_dict.values():
@@ -273,6 +357,7 @@ class TypeIPrediction(TitrationCurve):
         datafile: str,
         header: int = 0,
         drop_nodes: Optional[List[str]] = None,
+        add_missing_edges: bool = False,
     ):
         """Retrieve the titration curve for one molecule from typeI predicted micropKas.
         
@@ -282,9 +367,13 @@ class TypeIPrediction(TitrationCurve):
         datafile - source of the type I pKa values as a csv file
         header - integer index for the header, set to None if no header
         drop_nodes - drop these states from generating the graph.        
+        add_missing_edges - if true, add additional edges from existing pKa for macroscopic pKa calculation.
         """
         data = get_typei_pka_data(mol_id, datafile, header)
         graph = create_graph_from_typei_df(data)
+
+        if add_missing_edges:
+            data, graph = calculate_additional_micropKa_edges(data, graph)
 
         # Drop any requested nodes.
         if drop_nodes is not None:
@@ -316,6 +405,7 @@ class TypeIPrediction(TitrationCurve):
         n_bootstrap: Optional[int] = 100,
         header: int = 0,
         drop_nodes: Optional[List[str]] = None,
+        add_missing_edges: bool = False,
     ):
         """Retrieve the titration curve for one molecule from typeI predicted micropKas.
         
@@ -327,6 +417,7 @@ class TypeIPrediction(TitrationCurve):
         drop_nodes - drop these states from generating the graph.        
         n_samples - the number of samples over which the SEM was determined
         n_bootstrap - number of curves to return.
+        add_missing_edges - if true, add additional edges from existing pKa for macroscopoc pKa calculation.
 
         Returns
         -------
@@ -338,6 +429,10 @@ class TypeIPrediction(TitrationCurve):
         charge_dict = dict(zip(charges["Microstate ID"], charges["Charge"]))
 
         graph = create_graph_from_typei_df(data)
+
+        if add_missing_edges:
+            data, graph = calculate_additional_micropKa_edges(data, graph)
+
         # Drop any requested nodes.
         if drop_nodes is not None:
             for node in drop_nodes:
@@ -376,21 +471,21 @@ class TypeIPrediction(TitrationCurve):
         return instance, instances
 
     def to_macroscopic(
-        self, bootstrap_sem=False, n_bootstrap_sem=10000
+        self, bootstrap_sem: bool = False, n_bootstrap_sem: int = 10000,
     ) -> TitrationCurve:
         """Convert microscopic pKas to macroscopic and provide a macroscopic curve.
 
         Parameters
         ----------
-        bootstrap_sem = if True, estimate SD for macroscopic pKa
-
+        bootstrap_sem - if True, estimate SD for macroscopic pKa
+        n_bootstrap_sem - number of samples to draw        
         """
 
-        species_dict = species_by_charge(self.state_ids, self.charges)
+        species_dict: Dict[int, List[str]] = species_by_charge(self.state_ids, self.charges)
         macropkas = list()
         for q in range(min(self.charges), max(self.charges)):
             pka = macropka_from_micro_pka(
-                q, species_by_charge(self.state_ids, self.charges), self.dataframe
+                q, species_dict, self.dataframe
             )
             macropkas.append(pka)
 
@@ -404,7 +499,7 @@ class TypeIPrediction(TitrationCurve):
                 newmacropkas = list()
                 for q in range(min(self.charges), max(self.charges)):
                     pka = macropka_from_micro_pka(
-                        q, species_by_charge(self.state_ids, self.charges), new_df
+                        q, species_dict, new_df
                     )
                     newmacropkas.append(pka)
                 data[:, n] = newmacropkas[:]
@@ -731,10 +826,9 @@ HaspKaType = Union[TitrationCurve, TypeIPrediction, TypeIIIPrediction]
 
 
 class SAMPL6DataProvider:
-    """Structured SAMPL6 prediction data provisioning.    
-
+    """Structured SAMPL6 prediction data provisioning.
     This class allows data to be located and described, and to load a single molecule at
-    a later time and return data as a list.
+    a later time and return data as a TitrationCurve object.
     """
 
     def __init__(
@@ -757,9 +851,10 @@ class SAMPL6DataProvider:
         label - a name to use in figures to denote the method
         load_options - extra options that can be used to load the data such as:
             header - integer index for the file header, set to None if no header [All types]
-            drop_nodes - drop these states from generating the graph. [Type I]            
+            drop_nodes - drop these states from generating the graph. [Type I]
+            add_missing_edges - Complete all microstate pairings between two macrostates, for macropKa computation Type[I]-macro          
         bootstrap_options - extra options to specify how to boostrap over data [Type I, Type III]
-            n_samples - the number of samples over which the SEM was determined
+            n_samples - the number of samples over which the SEM was determined            
         typeiii_charge_file - csv file to retrieve charge of most populated species at pH 7 from.
             Format: 
                 Molecule, Charge
@@ -811,14 +906,13 @@ class SAMPL6DataProvider:
                 UserWarning,
             )
             self.load = lambda mol_id: TypeIPrediction.from_id(
-                mol_id, self.file_path, **self.load_opts
+                mol_id, self.file_path, **self.load_opts,
             ).to_macroscopic(bootstrap_sem=True)
             self.can_bootstrap = True
 
             self.bootstrap = lambda mol_id, n_bootstrap: TypeIPrediction.to_macroscopic_bootstrap(
-                mol_id, self.file_path, **bootstrapkwargs, n_bootstrap=n_bootstrap
+                mol_id, self.file_path, **bootstrapkwargs, n_bootstrap=n_bootstrap,
             )
-
         elif self.data_type == "typeii":
             self.load = lambda mol_id: TypeIIPrediction.from_id(
                 mol_id, self.file_path, **self.load_opts
