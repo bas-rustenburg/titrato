@@ -2,8 +2,6 @@ import numpy as np
 from scipy import stats
 from typing import Tuple, Union
 from warnings import warn
-import numexpr as ne
-
 
 def pearson_with_confidence(
     x: np.ndarray, y: np.ndarray, α: float
@@ -89,13 +87,6 @@ def area_between_curves(curve1: np.ndarray, curve2: np.ndarray, dx=0.1):
     area = diff * dx
 
     return np.sum(area)
-
-
-def area_between_curves_ne(curve1: np.ndarray, curve2: np.ndarray, dx=0.1, pHdim=1):
-    """Calculate area between curves using chunks of size dx."""
-    areas = ne.evaluate("(curve1 - curve2) * dx")
-    return ne.evaluate("sum(areas, axis=1)")
-
 
 def area_curve_vectorized(curve1, curve2, dx, pHdim=1):
     diff = np.abs(curve1 - curve2)
