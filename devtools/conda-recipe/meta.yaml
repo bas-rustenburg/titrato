@@ -1,6 +1,6 @@
 package:
   name: titrato
-  version: "0.0.1"
+  version: "0.0.3"
 
 source:
   path: ../..
@@ -17,14 +17,16 @@ requirements:
     - python
     - scipy
     - numpy
-    - holoviews
     - matplotlib
     - pandas
     - networkx
     - pydot
     - adjusttext
-    - numexpr
     - typing_extensions
+    - networkx
+    - tqdm
+    - uncertainties
+    - seaborn
 
 test:
   requires:
