@@ -341,7 +341,7 @@ def get_experimental_pKa_data(
 class TypeIPrediction(TitrationCurve):
     """Representation of a Type I (micropKa) prediction for SAMPL6"""
 
-    ph_range = np.linspace(2, 12, num=101)
+    ph_range = np.linspace(0, 14, num=141)
 
     def __init__(self):
         super(TypeIPrediction, self).__init__()

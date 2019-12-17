@@ -10,13 +10,14 @@ import pandas as pd
 import seaborn as sns
 from adjustText import adjust_text
 from matplotlib import pyplot as plt
-from tqdm.autonotebook import tqdm, trange
+from tqdm.auto import tqdm, trange
 from matplotlib.ticker import MaxNLocator, MultipleLocator
 from matplotlib.font_manager import FontProperties
+import adjustText
 
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
-from titrato import closest_pka, hungarian_pka, align_pka
+from titrato import closest_pka, hungarian_pka, align_pka, TitrationCurve
 from titrato import fit_titration_curves_3d
 from titrato.stats import (
     absolute_loss,
@@ -1731,7 +1732,7 @@ def plot_micropka_network(
             -1 * titrationcurve.augmented_graph.edges[edge[0], edge[1]]["pKa"]
         )
 
-    fig = plt.figure(figsize=(9,13), dpi=75)
+    fig = plt.figure(figsize=(9, 13), dpi=75)
     pos = pydot_layout(titrationcurve.graph, prog="dot")
     nx.draw_networkx_nodes(
         titrationcurve.augmented_graph,
@@ -1756,7 +1757,7 @@ def plot_micropka_network(
         pos,
         edge_labels=edge_labels,
         alpha=0.75,
-        node_size=6000
+        node_size=6000,
     )
 
     plt.tight_layout()
@@ -1809,3 +1810,128 @@ def tabulate_cycles(titrationcurve: TypeIPrediction, length: int = 4) -> str:
         markdown += f" {cycle} | {tot:.3f} \n"
 
     return markdown
+
+
+def plot_free_energy_vs_ph(
+    curve: TitrationCurve, base_e: bool = True, color_by_charge=True, mono_color=False
+):
+    """Plot the free energy of each state as a function of pH.
+    Parameters
+    ----------
+    curve - Titration curve object
+    base_e - Plot free energy in base e (RT units), set to false for pKa units.
+    color_by_charge - Plot each state colored according to charge.
+    mono_color - If not coloring by charge, use a single color (printer/colorblind friendly). Unfortunately has low contrast. 
+    """
+    fig = plt.figure(figsize=(6, 7), dpi=90)
+    ax = plt.gca()
+    log_base = 1.0 if base_e else np.log(10)
+    if color_by_charge:
+        colors = [
+            charge_colors[q] for q in curve.charges
+        ]  # charge for each state converted to color
+    else:
+        if mono_color:
+            colors = sns.color_palette("Greys", len(curve.state_ids))
+        else:
+            colors = sns.color_palette("hls", len(curve.state_ids))
+    for i in range(len(curve.state_ids)):
+        label = curve.state_ids[i]
+        free_energy = curve.free_energies[i, :] / log_base
+
+        plt.plot(curve.ph_values, free_energy, color=colors[i], label=label)
+
+        # If colored by charge, add some textual labels on the right side
+        if color_by_charge:
+            t = plt.annotate(
+                label.split("_")[1][5:],
+                (curve.ph_values[-1], free_energy[-1]),
+                (curve.ph_values[-1] + 0.8 * (i % 5), free_energy[-1]),
+                backgroundcolor="white",
+                color=colors[i],
+                alpha=1.0,
+                size=10,
+                # arrowprops={"arrowstyle": "->", "color":"black"},
+            )
+            t.set_bbox(dict(alpha=0.0))
+    if base_e:
+        plt.ylabel("Free energy (RT)", size=12)
+    else:
+        plt.ylabel("Free energy (pKa units)", size=12)
+
+    plt.xlabel("pH", size=12)
+    plt.xticks(size=12)
+    plt.yticks(size=12)
+    plt.tight_layout()
+    return fig, ax
+
+
+def plot_population_vs_ph(curve: TitrationCurve, mono_color=False):
+    """Plot the free energy of each state as a function of pH.
+    Parameters
+    ----------
+    curve - Titration curve object
+    mono_color - If not coloring by charge, use a single color (printer/colorblind friendly). Unfortunately has low contrast. 
+    """
+    fig = plt.figure(figsize=(6, 7), dpi=90)
+    ax = plt.gca()
+    if mono_color:
+        colors = sns.color_palette("Greys", len(curve.state_ids))
+    else:
+        colors = sns.color_palette("hls", len(curve.state_ids))
+    for i in range(len(curve.state_ids)):
+        label = curve.state_ids[i]
+        pop = curve.populations[i, :]
+
+        plt.plot(curve.ph_values, pop, color=colors[i], label=label)
+
+    plt.ylabel("Population", size=12)
+
+    plt.xlabel("pH", size=12)
+    plt.xticks(size=12)
+    plt.yticks(size=12)
+    plt.tight_layout()
+    return fig, ax
+
+
+def make_table_free_energy(
+    curve: TypeIPrediction, base_e: bool = True, ph: float = 0.0
+) -> str:
+    """Make a table of the free energy of each state, and how it was derived.
+
+    Parameters
+    ----------
+    curve - TypeIPrediction object for a single molecule to list free energy for.
+    base_e - Set to True to in natural log base instead of pKa units.
+    ph - The pH at which the free energy is to be retrieved (make sure this is included in the supplied curve.)
+
+    Returns
+    -------
+    str with markdown formatted table.
+
+    Note
+    ----
+    The most deprotonated state is typically the pKa reference, from which other states are derived.
+
+    """
+    # Find where pH is equal to specified value. If this raises index error, no pH 0 value is included
+    try:
+        index = np.argwhere(np.isclose(ph, curve.ph_values))[0][0]
+    except IndexError:
+        raise IndexError(f"Titration curve does not include pH {ph:f}.")
+
+    # log base correction to switch between 10 and e.
+    log_base = 1.0 if base_e else np.log(10)
+    if base_e: 
+        table_name = f"Free energy (RT) at pH {ph}"
+    else:
+        table_name = f"Free energy (pKa units) at pH {ph}"
+
+    markdown = f"Microstate | {table_name} | pKa references\n ---|---|---\n"
+    for (i, f, p) in zip(
+        curve.state_ids, curve.free_energies[:, index] / (log_base), curve.pka_paths
+    ):
+        markdown += f"{i} | {f} | {' -> '.join(p)}\n"
+
+    return markdown
+

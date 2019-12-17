@@ -804,6 +804,7 @@ class TitrationCurve:
     charge - 1D array of the charge assigned to each state
     graph - nx.DiGraph for micropKa derived titration curves with the one-directional network of titration states.
     augumented_graph - nx.DiGraph for micropKa derived titration curves with bidirectional network of titration states.
+    pka_paths - List[List[str]] For each state, the pKa values used to derive the free energy. 
     """
 
     def __init__(self):
@@ -967,11 +968,11 @@ class TitrationCurve:
         all_nodes.insert(0, reference)
         augmented_graph = add_reverse_equilibrium_arrows(graph)
         augmented_graph = add_Ka_equil_graph(augmented_graph)
-        pka_paths: List[str] = ['']
+        pka_paths: List[List[str]] = [[reference]]
         instance = cls()
         instance.augmented_graph = augmented_graph
         energies: List[np.ndarray] = list()
-
+    
         nbound: List[int] = [0]
 
         energies.append(free_energy_from_pka(0, 0.0, ph_values))
@@ -1131,46 +1132,3 @@ class TitrationCurve:
                 offset = i
 
         self.mean_charge = aligned_q2
-
-    def plot(self, category_name: str) -> hv.Layout:
-        """Plot the titration curve as a function of pH.
-
-        Parameters
-        ----------
-        category 
-        """
-        category_data: Optional[np.ndarray] = None
-        if category_name == "population":
-            category_data = self.populations
-        elif category_name == "free_energy":
-            category_data = self.free_energies
-        elif category_name == "charge":
-            category_data = self.mean_charge
-        else:
-            raise ValueError(
-                "Pick population or free_energy, or charge as category names."
-            )
-
-        if category_name in ["population", "free_energy"]:
-            data_series = dict(pH=self.ph_values)
-            state_vars = []
-            for s, state in enumerate(category_data):
-                if self.state_ids is None:
-                    state_var = "{}".format(s + 1)
-                else:
-                    state_var = self.state_ids[s]
-                data_series[state_var] = state
-                state_vars.append(state_var)
-
-            df = pd.DataFrame.from_dict(data_series)
-            df_cat = df.melt(
-                id_vars=["pH"],
-                value_vars=state_vars,
-                var_name="State",
-                value_name=category_name,
-            )
-            ds_cat = hv.Dataset(df_cat, vdims=category_name)
-            return ds_cat.to(hv.Curve, "pH", groupby="State").overlay()
-        elif category_name in ["charge"]:
-            xy = np.asarray([self.ph_values, self.mean_charge]).T
-            return hv.Curve(xy, "pH", "Mean molecular charge")
