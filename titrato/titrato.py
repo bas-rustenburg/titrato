@@ -5,7 +5,6 @@ Utilities for calculating titration curves.
 
 import numpy as np
 import pandas as pd
-import holoviews as hv
 import logging
 from itertools import chain, combinations
 
@@ -45,25 +44,6 @@ references = [
     "Ullmann, J Phys Chem B vol 107, No 5, 2003. 1263-1271",
     "Mehtap Isik et al, to be submitted to JCAMD 2018",
 ]
-
-
-def quicksave(
-    plot_object: Any,
-    outfile_basename: str,
-    renderer: str = "matplotlib",
-    fmt: Optional[str] = None,
-) -> None:
-    """Quicksave function for a holoviews plot to a standalone html file.
-
-    Parameters
-    ----------
-    plot_object - a holoviews layout object    
-    outfile_basename - The base name of the output file.
-    renderer - name of a holoviews renderer, e.g 'bokeh', 'matplotlib', or 'plotly'
-    """
-    hv.renderer(renderer).save(plot_object, outfile_basename, fmt=fmt)
-
-    return
 
 
 def graph_to_axes(
