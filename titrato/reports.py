@@ -41,7 +41,6 @@ from .stats import (
     area_curve_vectorized,
     rmsd_curve_vectorized,
     BootstrapDistribution,
-    area_between_curves_ne,
 )
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
 import logging
