@@ -5,11 +5,19 @@ titrato
 [![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/choderalab/branch/master?svg=true)](https://ci.appveyor.com/project/choderalab/titrato/branch/master)
 [![codecov](https://codecov.io/gh/choderalab/titrato/branch/master/graph/badge.svg)](https://codecov.io/gh/choderalab/titrato/branch/master)
 
-Utilities for calculating titration curves. Python 3.6+ only.
+Utilities for calculating titration curves. Python 3.7+ only.
+
+### Build instructions
+To build a conda package manually, use
+
+```
+conda build -c conda-forge devtools/conda-recipe/
+
+```
 
 ### Copyright
 
-Copyright (c) 2018, Bas Rustenburg
+Copyright (c) 2019, Chodera lab
 
 
 #### Acknowledgements
