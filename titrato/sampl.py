@@ -524,6 +524,132 @@ class TypeIPrediction(TitrationCurve):
         ]
         return instance, instances
 
+class MicropKaTitrationCurve(TypeIPrediction):
+    @classmethod
+    def from_id(
+        cls,
+        mol_id: str,
+        datafile: str,
+        chargefile: str,
+        header: int = 0,
+        drop_nodes: Optional[List[str]] = None,
+        add_missing_edges: bool = False,
+        ph_values=np.linspace(0,14,141)
+    ):
+        """Retrieve the titration curve for one molecule from typeI predicted micropKas.
+        
+        Parameters
+        ----------
+        mol_id - the SAMPL6 identifier for this molecule
+        datafile - source of the type I pKa values as a csv file(protonated, deprotonated, pka, sem)
+        chargefile - source of the microstate charges as a csv file (molecule, state_id, charge)
+        header - integer index for the header, set to None if no header
+        drop_nodes - drop these states from generating the graph.        
+        add_missing_edges - if true, add additional edges from existing pKa for macroscopic pKa calculation.
+        ph_values - numpy array of pH values to include in titration curve. (defaults 0-14 with 141 points)
+        """
+        data = get_typei_pka_data(mol_id, datafile, header)
+        graph = create_graph_from_typei_df(data)
+
+        if add_missing_edges:
+            data, graph = calculate_additional_micropKa_edges(data, graph)
+
+        # Drop any requested nodes.
+        if drop_nodes is not None:
+            for node in drop_nodes:
+                graph.remove_node(node)
+
+        micropKas = np.asarray(data["pKa"])
+        sems = np.asarray(data["SEM"])
+
+        instance = cls.from_equilibrium_graph(graph, ph_values)
+        # Store data for reference
+        instance.graph = graph
+        instance.pkas = micropKas
+        instance.sems = sems
+
+        instance._update_charges_from_file(chargefile)
+        instance._pick_zero_charge_ref_state()
+
+        instance.dataframe = data
+
+        return instance
+
+    @classmethod
+    def bootstrap_from_id(
+        cls,
+        mol_id: str,
+        datafile: str,
+        chargefile: str,
+        n_samples: Optional[int] = 1,
+        n_bootstrap: Optional[int] = 100,
+        header: int = 0,
+        drop_nodes: Optional[List[str]] = None,
+        add_missing_edges: bool = False,
+    ):
+        """Retrieve the titration curve for one molecule from typeI predicted micropKas.
+        
+        Parameters
+        ----------
+        mol_id - the SAMPL6 identifier for this molecule
+        datafile - source of the type I pKa values as a csv file
+        chargefile - source of the microstate charges as a csv file (molecule, state_id, charge)
+        header - integer index for the header, set to None if no header
+        drop_nodes - drop these states from generating the graph.        
+        n_samples - the number of samples over which the SEM was determined
+        n_bootstrap - number of curves to return.
+        add_missing_edges - if true, add additional edges from existing pKa for macroscopoc pKa calculation.
+
+        Returns
+        -------
+        original curve, list of bootstrap curves
+        """
+        data = get_typei_pka_data(mol_id, datafile, header)
+
+        charges = pd.read_csv(sampl6_charges_file)
+        charge_dict = dict(zip(charges["Microstate ID"], charges["Charge"]))
+
+        graph = create_graph_from_typei_df(data)
+
+        if add_missing_edges:
+            data, graph = calculate_additional_micropKa_edges(data, graph)
+
+        # Drop any requested nodes.
+        if drop_nodes is not None:
+            for node in drop_nodes:
+                graph.remove_node(node)
+
+        instances: List[TitrationCurve] = list()
+        for bootstrap_sample in range(n_bootstrap):
+            bootstrap_copy = data.copy()
+            bootstrap_copy["pKa"] = data.apply(
+                lambda row: np.random.normal(
+                    row["pKa"], row["SEM"] * np.sqrt(n_samples)
+                ),
+                axis=1,
+            )
+            bootstrap_graph = create_graph_from_typei_df(bootstrap_copy)
+            # Drop any requested nodes.
+            if drop_nodes is not None:
+                for node in drop_nodes:
+                    bootstrap_graph.remove_node(node)
+            new_instance = cls.from_equilibrium_graph(bootstrap_graph, cls.ph_range)
+            new_instance._update_charges_from_dict(charge_dict)
+            new_instance._pick_zero_charge_ref_state()
+            new_instance.dataframe = bootstrap_copy
+            instances.append(new_instance)
+
+        micropKas = np.asarray(data["pKa"])
+        sems = np.asarray(data["SEM"])
+
+        instance = cls.from_equilibrium_graph(graph, cls.ph_range)
+        # Store data for reference
+        instance.pkas = micropKas
+        instance.sems = sems
+        instance._update_charges_from_file(chargefile)
+        instance._pick_zero_charge_ref_state()
+        instance.dataframe = data
+        return instance, instances
 
 class TypeIIPrediction(TitrationCurve):
     """Representation of a Type II (microstate log population) prediction for SAMPL6"""
@@ -819,7 +945,7 @@ def bootstrap_comparison(
 # TitrationCurveType defines a type that has to be one of the subclasses below
 # Easier shorthand than having to use Union everywhere
 TitrationCurveType = Union[
-    TitrationCurve, TypeIPrediction, TypeIIPrediction, TypeIIIPrediction
+    TitrationCurve, TypeIPrediction, TypeIIPrediction, TypeIIIPrediction, MicropKaTitrationCurve
 ]
 
 HaspKaType = Union[TitrationCurve, TypeIPrediction, TypeIIIPrediction]

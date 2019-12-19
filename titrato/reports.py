@@ -1713,7 +1713,7 @@ def plot_micropka_network(
     titrationcurve: TypeIPrediction
 ) -> Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
     """Plot the network of microstates connected by pKa values."""
-    if not isinstance(titrationcurve, TypeIPrediction):
+    if not issubclass(type(titrationcurve), TypeIPrediction):
         raise TypeError(
             "This function only implements handling of TypeIPrediction objects."
         )
@@ -1721,20 +1721,20 @@ def plot_micropka_network(
     charges = dict(zip(titrationcurve.state_ids, titrationcurve.charges))
 
     node_colors = []
-    for node in titrationcurve.augmented_graph.nodes:
+    for node in titrationcurve.graph.nodes:
         node_colors.append(charge_colors[charges[node]])
 
     edge_labels = dict()
-    for edge in titrationcurve.augmented_graph.edges:
+    for edge in titrationcurve.graph.edges:
         # multiply by -1 to make arrow direction match pKa direction
-        edge_labels[(edge[0], edge[1])] = "{:.2f}".format(
-            -1 * titrationcurve.augmented_graph.edges[edge[0], edge[1]]["pKa"]
+        edge_labels[(edge[0], edge[1])] = "pKa : {:.2f}".format(
+            -1 * titrationcurve.graph.edges[edge[0], edge[1]]["pKa"]
         )
 
-    fig = plt.figure(figsize=(9, 13), dpi=75)
+    fig = plt.figure(figsize=(7, 11), dpi=75)
     pos = pydot_layout(titrationcurve.graph, prog="dot")
     nx.draw_networkx_nodes(
-        titrationcurve.augmented_graph,
+        titrationcurve.graph,
         pos,
         node_color=node_colors,
         alpha=0.85,
@@ -1742,17 +1742,16 @@ def plot_micropka_network(
         node_shape="o",
     )
     nx.draw_networkx_labels(
-        titrationcurve.augmented_graph, pos, node_color=node_colors, alpha=1
+        titrationcurve.graph, pos, node_color=node_colors, alpha=1
     )
     nx.draw_networkx_edge_labels(
-        titrationcurve.augmented_graph,
+        titrationcurve.graph,
         pos,
-        label_pos=0.65,
         edge_labels=edge_labels,
         alpha=0.75,
     )
     nx.draw_networkx_edges(
-        titrationcurve.augmented_graph,
+        titrationcurve.graph,
         pos,
         edge_labels=edge_labels,
         alpha=0.75,
@@ -1786,7 +1785,7 @@ def tabulate_cycles(titrationcurve: TypeIPrediction, length: int = 4) -> str:
 
     """
     # # Find cycles of a specific length
-    if not isinstance(titrationcurve, TypeIPrediction):
+    if not issubclass(type(titrationcurve), TypeIPrediction):
         raise TypeError(
             "This function only implements handling of TypeIPrediction objects."
         )
@@ -1893,7 +1892,7 @@ def plot_population_vs_ph(curve: TitrationCurve, mono_color=False):
     return fig, ax
 
 
-def make_table_free_energy(
+def tabulate_free_energy(
     curve: TypeIPrediction, base_e: bool = True, ph: float = 0.0
 ) -> str:
     """Make a table of the free energy of each state, and how it was derived.
