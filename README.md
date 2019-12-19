@@ -4,6 +4,7 @@ titrato
 [![Travis Build Status](https://travis-ci.org/choderalab/titrato.png)](https://travis-ci.org/choderalab/titrato)
 [![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/choderalab/branch/master?svg=true)](https://ci.appveyor.com/project/choderalab/titrato/branch/master)
 [![codecov](https://codecov.io/gh/choderalab/titrato/branch/master/graph/badge.svg)](https://codecov.io/gh/choderalab/titrato/branch/master)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/choderalab/titrato/0.0.5-demo?filepath=demo%2Fdemo.ipynb)
 
 Utilities for calculating titration curves. Python 3.7+ only.
 
